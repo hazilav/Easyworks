@@ -1,0 +1,290 @@
+import { BusinessProfile, Customer, CatalogItem, Quotation } from '@/types';
+import { calculateQuotationTotals, generateQuotationNumber } from './calculator';
+
+export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
+  id: 'biz_default',
+  businessName: 'Easyworks Interiors & Fabrication',
+  tagline: 'Precision Craftsmanship & Smart Design',
+  ownerName: 'Admin',
+  phone: '+91 98765 43210',
+  email: 'contact@easyworks.com',
+  website: 'https://easyworks.com',
+  address: 'Suite 402, High Street Plaza, Kochi, Kerala - 682001',
+  taxNumber: '32AABCE1234F1Z5',
+  currency: 'INR',
+  defaultTaxPercentage: 18,
+  defaultPaymentTerms: '50% advance on order confirmation, 40% on material dispatch, 10% on completion.',
+  defaultValidityDays: 15,
+  termsAndConditions: '1. Quotation is valid for 15 days from the date of issue.\n2. Variations or scope adjustments will be charged extra.\n3. Taxes as applicable per statutory norms.\n4. Work begins within 3 days of advance clearance.',
+  bankDetails: {
+    bankName: 'HDFC Bank Ltd',
+    accountName: 'Easyworks Solutions',
+    accountNumber: '50200012345678',
+    ifscOrRouting: 'HDFC0001234',
+    upiId: 'easyworks@hdfcbank',
+  },
+  logoUrl: '',
+};
+
+export const INITIAL_CATALOG_ITEMS: CatalogItem[] = [
+  {
+    id: 'item-1',
+    name: 'Marine Plywood',
+    category: 'Materials',
+    unit: 'sq ft',
+    defaultRate: 2200,
+    taxPercentage: 18,
+    description: 'IS 710 Grade Boiling Waterproof (BWP) 19mm Marine Ply',
+  },
+  {
+    id: 'item-2',
+    name: 'Hardware & Fittings',
+    category: 'Hardware',
+    unit: 'set',
+    defaultRate: 8000,
+    taxPercentage: 18,
+    description: 'Soft-close hinges, premium telescopic channels & handles',
+  },
+  {
+    id: 'item-3',
+    name: 'Installation & Assembly',
+    category: 'Labor',
+    unit: 'job',
+    defaultRate: 12000,
+    taxPercentage: 18,
+    description: 'Expert carpenter on-site fitting, alignment, and final handover',
+  },
+  {
+    id: 'item-4',
+    name: 'Kitchen Cupboard',
+    category: 'Cabinetry',
+    unit: 'feet',
+    defaultRate: 2200,
+    taxPercentage: 18,
+    description: 'Custom modular base and overhead cabinet setup',
+  },
+  {
+    id: 'item-5',
+    name: 'Website Design & Development',
+    category: 'Digital Services',
+    unit: 'project',
+    defaultRate: 35000,
+    taxPercentage: 18,
+    description: 'Full responsive website design, CMS integration & mobile optimization',
+  },
+  {
+    id: 'item-6',
+    name: 'Domain Registration',
+    category: 'Digital Services',
+    unit: 'year',
+    defaultRate: 1200,
+    taxPercentage: 18,
+    description: '1 year .com or .in domain registration with DNS management',
+  },
+  {
+    id: 'item-7',
+    name: 'Cloud Hosting',
+    category: 'Digital Services',
+    unit: 'year',
+    defaultRate: 3000,
+    taxPercentage: 18,
+    description: 'High-speed SSD cloud hosting with automated SSL and backups',
+  },
+  {
+    id: 'item-8',
+    name: 'Logo Design',
+    category: 'Design',
+    unit: 'job',
+    defaultRate: 5000,
+    taxPercentage: 18,
+    description: 'Vector logo package with branding guidelines & color palette',
+  },
+];
+
+export const INITIAL_CUSTOMERS: Customer[] = [
+  {
+    id: 'cust-1',
+    name: 'Ahmed',
+    company: 'Ahmed Villa',
+    phone: '+91 98450 11223',
+    email: 'ahmed@example.com',
+    address: 'Kakkanad, Kochi, Kerala',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'cust-2',
+    name: 'Sameer',
+    company: 'Skyline Residencies',
+    phone: '+91 97400 98765',
+    email: 'sameer.work@gmail.com',
+    address: 'Flat 4B, Skyline Gardens, Marine Drive',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'cust-3',
+    name: 'ABC Company',
+    company: 'ABC Technologies Pvt Ltd',
+    phone: '+91 99999 88888',
+    email: 'procurement@abccompany.com',
+    address: 'Infopark Phase 2, Kochi',
+    taxNumber: '32AABCA9999X1Z1',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+export function createBlankQuotation(business: BusinessProfile = DEFAULT_BUSINESS_PROFILE, template: 'modern' | 'classic' | 'minimalist' = 'modern'): Quotation {
+  const today = new Date();
+  const validUntil = new Date();
+  validUntil.setDate(today.getDate() + (business.defaultValidityDays || 15));
+
+  return {
+    id: 'qt_' + Math.random().toString(36).substring(2, 9),
+    quotationNumber: generateQuotationNumber(1),
+    title: 'Quotation Draft',
+    status: 'draft',
+    date: today.toISOString().split('T')[0],
+    validUntil: validUntil.toISOString().split('T')[0],
+    template,
+    business: {
+      businessName: business.businessName,
+      ownerName: business.ownerName,
+      phone: business.phone,
+      email: business.email,
+      address: business.address,
+      website: business.website,
+      taxNumber: business.taxNumber,
+      logoUrl: business.logoUrl,
+    },
+    customer: {
+      name: '',
+      company: '',
+      phone: '',
+      email: '',
+      address: '',
+      taxNumber: '',
+    },
+    items: [],
+    currency: business.currency || 'INR',
+    totals: {
+      subtotal: 0,
+      itemDiscountsTotal: 0,
+      globalDiscountType: 'percentage',
+      globalDiscountValue: 0,
+      globalDiscountAmount: 0,
+      taxableAmount: 0,
+      taxPercentage: business.defaultTaxPercentage || 0,
+      taxAmount: 0,
+      grandTotal: 0,
+      amountPaid: 0,
+      balanceDue: 0,
+    },
+    paymentTerms: business.defaultPaymentTerms || '',
+    termsAndConditions: business.termsAndConditions || '',
+    notes: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function createBlankInvoice(
+  business: BusinessProfile = DEFAULT_BUSINESS_PROFILE,
+  template: 'modern' | 'classic' | 'minimalist' = 'modern',
+  fromQuotation?: Quotation
+): import('@/types').Invoice {
+  const today = new Date();
+  const dueDate = new Date();
+  dueDate.setDate(today.getDate() + 15);
+
+  if (fromQuotation) {
+    return {
+      id: 'inv_' + Math.random().toString(36).substring(2, 9),
+      invoiceNumber: 'INV-' + today.getFullYear() + '-0001',
+      title: `Invoice for ${fromQuotation.customer.name || 'Customer'}`,
+      status: 'draft',
+      date: today.toISOString().split('T')[0],
+      dueDate: dueDate.toISOString().split('T')[0],
+      template: fromQuotation.template || template,
+      business: { ...fromQuotation.business },
+      customer: { ...fromQuotation.customer },
+      items: fromQuotation.items.map(it => ({ ...it })),
+      currency: fromQuotation.currency,
+      totals: {
+        ...fromQuotation.totals,
+        amountPaid: 0,
+        balanceDue: fromQuotation.totals.grandTotal,
+      },
+      paymentTerms: fromQuotation.paymentTerms || business.defaultPaymentTerms,
+      paymentSection: {
+        bankName: business.bankDetails?.bankName || '',
+        accountName: business.bankDetails?.accountName || '',
+        accountNumber: business.bankDetails?.accountNumber || '',
+        ifscOrRouting: business.bankDetails?.ifscOrRouting || '',
+        swiftCode: business.bankDetails?.swiftCode || '',
+        upiId: business.bankDetails?.upiId || '',
+        paymentInstructions: business.bankDetails?.paymentInstructions || '',
+      },
+      termsAndConditions: fromQuotation.termsAndConditions || business.termsAndConditions,
+      notes: fromQuotation.notes || '',
+      quotationId: fromQuotation.id,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return {
+    id: 'inv_' + Math.random().toString(36).substring(2, 9),
+    invoiceNumber: 'INV-' + today.getFullYear() + '-0001',
+    title: 'New Invoice',
+    status: 'draft',
+    date: today.toISOString().split('T')[0],
+    dueDate: dueDate.toISOString().split('T')[0],
+    template,
+    business: {
+      businessName: business.businessName,
+      ownerName: business.ownerName,
+      phone: business.phone,
+      email: business.email,
+      address: business.address,
+      website: business.website,
+      taxNumber: business.taxNumber,
+      logoUrl: business.logoUrl,
+    },
+    customer: {
+      name: '',
+      company: '',
+      phone: '',
+      email: '',
+      address: '',
+      taxNumber: '',
+    },
+    items: [],
+    currency: business.currency || 'INR',
+    totals: {
+      subtotal: 0,
+      itemDiscountsTotal: 0,
+      globalDiscountType: 'percentage',
+      globalDiscountValue: 0,
+      globalDiscountAmount: 0,
+      taxableAmount: 0,
+      taxPercentage: business.defaultTaxPercentage || 0,
+      taxAmount: 0,
+      grandTotal: 0,
+      amountPaid: 0,
+      balanceDue: 0,
+    },
+    paymentTerms: business.defaultPaymentTerms || '',
+    paymentSection: {
+      bankName: business.bankDetails?.bankName || '',
+      accountName: business.bankDetails?.accountName || '',
+      accountNumber: business.bankDetails?.accountNumber || '',
+      ifscOrRouting: business.bankDetails?.ifscOrRouting || '',
+      swiftCode: business.bankDetails?.swiftCode || '',
+      upiId: business.bankDetails?.upiId || '',
+      paymentInstructions: business.bankDetails?.paymentInstructions || '',
+    },
+    termsAndConditions: business.termsAndConditions || '',
+    notes: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
