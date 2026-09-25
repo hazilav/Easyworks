@@ -46,7 +46,7 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
 
   // Lifecycle Action Modals
   const [activeActionModal, setActiveActionModal] = useState<{
-    type: 'EXTEND' | 'CHANGE_PLAN' | 'SUSPEND' | 'MANUAL_ACTIVATE' | 'CANCEL' | 'ADJUST_PDF' | 'ADD_BONUS_PDF';
+    type: 'EXTEND' | 'CHANGE_PLAN' | 'SUSPEND' | 'MANUAL_ACTIVATE' | 'CANCEL' | 'ADJUST_PDF' | 'ADD_BONUS_PDF' | 'REMOVE_PDF_CREDITS';
     customer: DeveloperCustomerSummary;
   } | null>(null);
 
@@ -55,6 +55,7 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
   const [suspendReason, setSuspendReason] = useState('');
   const [customPdfLimit, setCustomPdfLimit] = useState(20);
   const [bonusPdfAmount, setBonusPdfAmount] = useState(10);
+  const [removePdfAmount, setRemovePdfAmount] = useState(5);
   const [actionLoading, setActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -140,6 +141,9 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
       } else if (type === 'ADD_BONUS_PDF') {
         body.action = 'ADD_BONUS_PDF';
         body.bonus = bonusPdfAmount;
+      } else if (type === 'REMOVE_PDF_CREDITS') {
+        body.action = 'REMOVE_PDF_CREDITS';
+        body.amount = removePdfAmount;
       }
 
       const res = await fetch('/api/developer/customers', {
@@ -294,8 +298,10 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
             {[
               { id: 'all', label: 'All' },
+              { id: 'near_limit', label: '⚠️ Near Limit (≥80%)' },
+              { id: 'limit_reached', label: '⛔ Limit Reached' },
               { id: 'active', label: 'Active Pro' },
-              { id: 'trialing', label: 'Trialing' },
+              { id: 'trialing', label: 'Trial' },
               { id: 'expired', label: 'Expired' },
               { id: 'payment_pending', label: 'Payment Pending' },
               { id: 'suspended', label: 'Suspended' },
@@ -678,10 +684,10 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                     <button
                       onClick={() => {
-                        setCustomPdfLimit(customerDetails.subscription?.pdfDownloadLimit ?? 20);
+                        setCustomPdfLimit(customerDetails.subscription?.pdfDownloadLimit ?? 30);
                         setActiveActionModal({
                           type: 'ADJUST_PDF',
                           customer: {
@@ -690,9 +696,9 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                           },
                         });
                       }}
-                      className="flex-1 py-1.5 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                      className="py-1.5 px-2 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors text-center"
                     >
-                      Adjust PDF Limit
+                      Adjust Limit
                     </button>
                     <button
                       onClick={() => {
@@ -705,18 +711,81 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                           },
                         });
                       }}
-                      className="flex-1 py-1.5 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                      className="py-1.5 px-2 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors text-center"
                     >
-                      +Bonus PDFs
+                      +Add Credits
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRemovePdfAmount(5);
+                        setActiveActionModal({
+                          type: 'REMOVE_PDF_CREDITS',
+                          customer: {
+                            ...customerDetails.user,
+                            subscription: customerDetails.subscription,
+                          },
+                        });
+                      }}
+                      className="py-1.5 px-2 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors text-center"
+                    >
+                      -Remove Credits
                     </button>
                     <button
                       onClick={() => handleResetPdfUsage(customerDetails.user)}
-                      className="py-1.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-amber-400 rounded-lg text-xs font-semibold cursor-pointer"
+                      className="py-1.5 px-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 rounded-lg text-xs font-semibold cursor-pointer text-center"
                       title="Reset PDF downloads used count to 0"
                     >
-                      Reset PDF Usage
+                      Reset Usage
                     </button>
                   </div>
+                </div>
+
+                {/* PDF Generation & Usage History Card */}
+                <div className="p-4 rounded-xl bg-[#121724] border border-zinc-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>PDF Download History ({customerDetails.pdfUsageHistory?.length || 0})</span>
+                    </h4>
+                    <span className="text-[10px] text-zinc-400 font-mono">Server Audit</span>
+                  </div>
+
+                  {(!customerDetails.pdfUsageHistory || customerDetails.pdfUsageHistory.length === 0) ? (
+                    <div className="py-4 text-center text-xs text-zinc-500">
+                      No PDF downloads recorded yet for this customer.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {customerDetails.pdfUsageHistory.map((log: any) => (
+                        <div
+                          key={log.id}
+                          className="p-2.5 rounded-lg bg-[#0e131f] border border-zinc-800/80 text-xs flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-white uppercase text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono">
+                                {log.documentType || 'DOCUMENT'}
+                              </span>
+                              <span className="font-mono text-zinc-200 text-xs truncate">
+                                {log.documentNumber || log.documentId || '—'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-zinc-500 mt-1 flex items-center gap-2">
+                              <span>IP: {log.ipAddress || '—'}</span>
+                              {log.userAgent && (
+                                <span className="truncate max-w-[200px]" title={log.userAgent}>
+                                  • {log.userAgent}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right text-[10px] text-zinc-400 font-mono shrink-0">
+                            {new Date(log.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Documents Summary */}
@@ -790,6 +859,7 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                 {activeActionModal.type === 'CANCEL' && 'Cancel Subscription'}
                 {activeActionModal.type === 'ADJUST_PDF' && 'Adjust Customer PDF Download Limit'}
                 {activeActionModal.type === 'ADD_BONUS_PDF' && 'Add Bonus PDF Downloads'}
+                {activeActionModal.type === 'REMOVE_PDF_CREDITS' && 'Deduct / Remove PDF Credits'}
               </h3>
               <button
                 onClick={() => setActiveActionModal(null)}
@@ -922,6 +992,43 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                 </div>
                 <p className="text-[11px] text-zinc-400">
                   Will increase limit from {activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2} to {(activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2) + bonusPdfAmount}.
+                </p>
+              </div>
+            )}
+
+            {activeActionModal.type === 'REMOVE_PDF_CREDITS' && (
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-zinc-300">
+                  PDF Credits to Deduct
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 5, 10, 20].map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setRemovePdfAmount(b)}
+                      className={`py-2 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                        removePdfAmount === b
+                          ? 'bg-rose-600 text-white'
+                          : 'bg-[#0e131f] border border-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      -{b} Credits
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-2">
+                  <label className="block text-[11px] text-zinc-400 mb-1">Or enter custom amount to remove:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={removePdfAmount}
+                    onChange={(e) => setRemovePdfAmount(parseInt(e.target.value, 10) || 1)}
+                    className="w-full h-9 px-3 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Current limit: {activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2} (Used: {activeActionModal.customer.subscription?.pdfDownloadsUsed ?? 0}). Deduction will not reduce limit below current downloads used.
                 </p>
               </div>
             )}

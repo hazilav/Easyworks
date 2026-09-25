@@ -386,6 +386,20 @@ export interface ActivityLog {
   createdAt: string;
 }
 
+export interface PdfUsageLog {
+  id: string;
+  userId: string;
+  userName?: string;
+  businessName?: string;
+  documentId?: string;
+  documentType: 'QUOTATION' | 'INVOICE' | 'OTHER';
+  documentNumber?: string;
+  subscriptionId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  createdAt: string;
+}
+
 export interface DeveloperStats {
   totalCustomers: number;
   activeSubscriptions: number;
@@ -395,6 +409,11 @@ export interface DeveloperStats {
   paymentVerified: number;
   totalRevenueINR: number;
   pdfsGenerated: number;
+  pdfsGeneratedToday: number;
+  pdfsGeneratedThisMonth: number;
+  customersAtLimit: number;
+  customersNearLimit: number;
+  trialPdfsUsed: number;
   activeToday: number;
   newCustomers: number;
   recentPayments: ManualPaymentRequest[];

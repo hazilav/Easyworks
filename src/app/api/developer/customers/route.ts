@@ -9,7 +9,9 @@ import {
   resetCustomerAccess,
   adjustCustomerPdfLimit,
   addBonusPdfDownloads,
+  removeCustomerPdfCredits,
   resetCustomerPdfUsage,
+  getCustomerPdfUsageHistory,
   verifyDeveloperSessionToken,
 } from '@/lib/db/database';
 
@@ -53,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { action, userId, planId, days, reason, durationMonths, limit, bonus } = body;
+    const { action, userId, planId, days, reason, durationMonths, limit, bonus, amount } = body;
 
     if (!action || !userId) {
       return NextResponse.json(
@@ -135,7 +137,7 @@ export async function POST(req: NextRequest) {
       }
 
       case 'ADD_BONUS_PDF': {
-        const bonusNum = parseInt(bonus, 10);
+        const bonusNum = parseInt(bonus || amount, 10);
         if (isNaN(bonusNum) || bonusNum <= 0) {
           return NextResponse.json({ success: false, error: 'Valid bonus amount is required.' }, { status: 400 });
         }
@@ -147,12 +149,33 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      case 'REMOVE_PDF_CREDITS': {
+        const amountNum = parseInt(amount || bonus, 10);
+        if (isNaN(amountNum) || amountNum <= 0) {
+          return NextResponse.json({ success: false, error: 'Valid amount to remove is required.' }, { status: 400 });
+        }
+        const updatedSub = removeCustomerPdfCredits(userId, amountNum);
+        return NextResponse.json({
+          success: true,
+          message: `Removed ${amountNum} PDF credits.`,
+          subscription: updatedSub,
+        });
+      }
+
       case 'RESET_PDF_USAGE': {
         const updatedSub = resetCustomerPdfUsage(userId);
         return NextResponse.json({
           success: true,
           message: 'PDF downloads usage counter reset to 0.',
           subscription: updatedSub,
+        });
+      }
+
+      case 'GET_PDF_USAGE_HISTORY': {
+        const history = getCustomerPdfUsageHistory(userId);
+        return NextResponse.json({
+          success: true,
+          history,
         });
       }
 

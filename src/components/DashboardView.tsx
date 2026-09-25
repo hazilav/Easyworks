@@ -30,6 +30,7 @@ export default function DashboardView() {
     business,
     requestPdfDownload,
     subscription,
+    setDownloadLimitModalOpen,
   } = useApp();
 
   const totalQuotations = quotations.length;
@@ -44,16 +45,26 @@ export default function DashboardView() {
   const pdfLimit = subscription?.pdfDownloadLimit ?? 2;
   const pdfUsed = subscription?.pdfDownloadsUsed ?? subscription?.trialPdfDownloads ?? 0;
   const pdfRemaining = subscription?.pdfDownloadsRemaining ?? Math.max(0, pdfLimit - pdfUsed);
+  const isNearLimit = pdfRemaining > 0 && pdfLimit > 0 && (pdfUsed / pdfLimit) >= 0.8;
+  const isLimitReached = pdfRemaining <= 0;
 
   const handleDownloadQuote = async (quote: Quotation) => {
-    const allowed = await requestPdfDownload('quotation', quote.id);
+    if (isLimitReached) {
+      setDownloadLimitModalOpen(true);
+      return;
+    }
+    const allowed = await requestPdfDownload('quotation', quote.id, quote.quotationNumber);
     if (!allowed) return;
     const doc = generateQuotationPDF(quote, business);
     doc.save(`${quote.quotationNumber}.pdf`);
   };
 
   const handleDownloadInvoice = async (inv: Invoice) => {
-    const allowed = await requestPdfDownload('invoice', inv.id);
+    if (isLimitReached) {
+      setDownloadLimitModalOpen(true);
+      return;
+    }
+    const allowed = await requestPdfDownload('invoice', inv.id, inv.invoiceNumber);
     if (!allowed) return;
     const doc = generateInvoicePDF(inv, business);
     doc.save(`${inv.invoiceNumber}.pdf`);
@@ -92,11 +103,11 @@ export default function DashboardView() {
           </div>
         </div>
 
-        {/* PDF Quota Status Card */}
+        {/* PDF Downloads Compact Usage Section (Requirement 10 & 19) */}
         <div className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
           pdfRemaining <= 0
             ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60'
-            : pdfRemaining <= 5
+            : isNearLimit
             ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60'
             : 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800'
         }`}>
@@ -104,7 +115,7 @@ export default function DashboardView() {
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
               pdfRemaining <= 0
                 ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400'
-                : pdfRemaining <= 5
+                : isNearLimit
                 ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400'
                 : 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
             }`}>
@@ -112,29 +123,34 @@ export default function DashboardView() {
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-slate-900 dark:text-white">
-                  PDF Download Quota:
+                <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  PDF Downloads
                 </span>
                 <span className={`text-xs font-mono font-bold ${
-                  pdfRemaining <= 0 ? 'text-rose-600 dark:text-rose-400' : pdfRemaining <= 5 ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
+                  pdfRemaining <= 0 ? 'text-rose-600 dark:text-rose-400' : isNearLimit ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
                 }`}>
-                  {pdfRemaining} remaining of {pdfLimit}
+                  {pdfRemaining} remaining
+                </span>
+                <span className="text-xs text-slate-400 dark:text-zinc-500 font-mono">
+                  ({pdfUsed} / {pdfLimit} used)
                 </span>
                 {pdfRemaining <= 0 && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300">
                     LIMIT REACHED
                   </span>
                 )}
-                {pdfRemaining > 0 && pdfRemaining <= 5 && (
+                {isNearLimit && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
-                    LOW QUOTA
+                    NEAR LIMIT
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
                 {pdfRemaining <= 0
-                  ? 'All PDF downloads included in your plan have been used. Upgrade or renew to export more PDFs.'
-                  : `${pdfUsed} PDFs downloaded so far. Quotation and invoice drafting is always unlimited.`}
+                  ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
+                  : isNearLimit
+                  ? `You're close to your PDF limit. ${pdfRemaining} downloads remaining.`
+                  : `${pdfUsed} / ${pdfLimit} used. Quotation and invoice drafting is always unlimited.`}
               </p>
             </div>
           </div>
@@ -147,7 +163,7 @@ export default function DashboardView() {
               <div className="w-24 h-1.5 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${
-                    pdfRemaining <= 0 ? 'bg-rose-500' : pdfRemaining <= 5 ? 'bg-amber-500' : 'bg-blue-600'
+                    pdfRemaining <= 0 ? 'bg-rose-500' : isNearLimit ? 'bg-amber-500' : 'bg-blue-600'
                   }`}
                   style={{ width: `${Math.min(100, Math.round((pdfUsed / Math.max(1, pdfLimit)) * 100))}%` }}
                 />
@@ -156,15 +172,9 @@ export default function DashboardView() {
 
             <button
               onClick={() => setCurrentView('billing')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
-                pdfRemaining <= 0
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
-                  : pdfRemaining <= 5
-                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
-              }`}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap bg-blue-600 hover:bg-blue-500 text-white shadow-xs"
             >
-              <span>{pdfRemaining <= 0 ? 'Upgrade Plan' : 'Manage Quota'}</span>
+              <span>View Billing</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -318,8 +328,16 @@ export default function DashboardView() {
                         </button>
                         <button
                           onClick={() => handleDownloadQuote(q)}
-                          className="h-7 w-7 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 rounded-lg text-slate-400 cursor-pointer transition-colors"
-                          title="Download PDF"
+                          className={`h-7 w-7 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                            isLimitReached
+                              ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                              : 'hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-blue-600 text-slate-400'
+                          }`}
+                          title={
+                            isLimitReached
+                              ? "You've reached your PDF download limit for this subscription. Upgrade or renew your plan to continue."
+                              : "Download PDF"
+                          }
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
@@ -405,8 +423,16 @@ export default function DashboardView() {
                         </button>
                         <button
                           onClick={() => handleDownloadInvoice(inv)}
-                          className="h-7 w-7 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-emerald-600 rounded-lg text-slate-400 cursor-pointer transition-colors"
-                          title="Download PDF"
+                          className={`h-7 w-7 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
+                            isLimitReached
+                              ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+                              : 'hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-emerald-600 text-slate-400'
+                          }`}
+                          title={
+                            isLimitReached
+                              ? "You've reached your PDF download limit for this subscription. Upgrade or renew your plan to continue."
+                              : "Download PDF"
+                          }
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>

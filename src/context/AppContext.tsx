@@ -61,7 +61,7 @@ interface AppContextType {
   setTrialExpiredModalOpen: (open: boolean) => void;
   downloadLimitModalOpen: boolean;
   setDownloadLimitModalOpen: (open: boolean) => void;
-  requestPdfDownload: (docType: 'quotation' | 'invoice', docId?: string) => Promise<boolean>;
+  requestPdfDownload: (docType: 'quotation' | 'invoice', docId?: string, docNumber?: string) => Promise<boolean>;
   refreshSubscription: (userToFetch?: UserAccount | null) => Promise<void>;
   refreshPlans: () => Promise<void>;
 
@@ -131,7 +131,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isSuspended =
     subscription?.status === 'SUSPENDED' || (currentUser as any)?.status === 'SUSPENDED';
 
-  const requestPdfDownload = async (docType: 'quotation' | 'invoice', docId?: string): Promise<boolean> => {
+  const requestPdfDownload = async (
+    docType: 'quotation' | 'invoice',
+    docId?: string,
+    docNumber?: string
+  ): Promise<boolean> => {
     if (!currentUser) return true;
     if (isSuspended) {
       return false;
@@ -145,6 +149,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           userId: currentUser.id,
           documentType: docType,
           documentId: docId,
+          documentNumber: docNumber,
         }),
       });
 

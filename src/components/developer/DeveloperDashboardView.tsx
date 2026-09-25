@@ -193,6 +193,73 @@ export default function DeveloperDashboardView({
           })}
         </div>
 
+        {/* PDF Generation & Quota Monitoring Section */}
+        <div className="bg-[#121724] border border-zinc-800/80 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-800/60 pb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-indigo-400" />
+              <h2 className="text-sm font-bold text-white">PDF Generation & Download Allowance Telemetry</h2>
+            </div>
+            <button
+              onClick={() => onNavigate('customers')}
+              className="text-xs text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>Manage Quotas in Customers</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3.5 rounded-xl bg-[#0e131f] border border-zinc-800/80">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">Total Generated</span>
+              <div className="text-xl font-bold text-white mt-1 font-mono">{stats.pdfsGenerated}</div>
+              <span className="text-[10px] text-zinc-500 mt-0.5 block">All-time downloads</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#0e131f] border border-zinc-800/80">
+              <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider block">PDFs Today</span>
+              <div className="text-xl font-bold text-indigo-300 mt-1 font-mono">{stats.pdfsGeneratedToday ?? 0}</div>
+              <span className="text-[10px] text-zinc-500 mt-0.5 block">Past 24 hours</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#0e131f] border border-zinc-800/80">
+              <span className="text-[10px] uppercase font-bold text-cyan-400 tracking-wider block">This Month</span>
+              <div className="text-xl font-bold text-cyan-300 mt-1 font-mono">{stats.pdfsGeneratedThisMonth ?? 0}</div>
+              <span className="text-[10px] text-zinc-500 mt-0.5 block">Calendar month</span>
+            </div>
+
+            <div
+              onClick={() => onNavigate('customers')}
+              className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 hover:border-rose-500/40 cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-rose-400 tracking-wider">At Limit (100%)</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              </div>
+              <div className="text-xl font-bold text-rose-300 mt-1 font-mono">{stats.customersAtLimit ?? 0}</div>
+              <span className="text-[10px] text-rose-400/80 mt-0.5 block">Quota fully exhausted</span>
+            </div>
+
+            <div
+              onClick={() => onNavigate('customers')}
+              className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Near Limit (≥80%)</span>
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <div className="text-xl font-bold text-amber-300 mt-1 font-mono">{stats.customersNearLimit ?? 0}</div>
+              <span className="text-[10px] text-amber-400/80 mt-0.5 block">Low quota remaining</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#0e131f] border border-zinc-800/80">
+              <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider block">Trial PDFs Used</span>
+              <div className="text-xl font-bold text-sky-300 mt-1 font-mono">{stats.trialPdfsUsed ?? 0}</div>
+              <span className="text-[10px] text-zinc-500 mt-0.5 block">Max 2 per evaluation</span>
+            </div>
+          </div>
+        </div>
+
         {/* Two Columns: Recent Payments & Activity Feed */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Recent Manual Payment Requests (8 Cols) */}

@@ -292,9 +292,24 @@ function initDatabase(db: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS pdf_usage_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      business_name TEXT,
+      document_id TEXT,
+      document_type TEXT NOT NULL,
+      document_number TEXT,
+      subscription_id TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_quotes_user_id ON quotations(user_id);
     CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_pdf_logs_user ON pdf_usage_logs(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_pdf_logs_created ON pdf_usage_logs(created_at);
   `);
 
   // Safe migration for existing subscriptions and users tables
@@ -308,15 +323,15 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT;'); } catch {}
   try { db.exec('ALTER TABLE users ADD COLUMN password_salt TEXT;'); } catch {}
   try { db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE';"); } catch {}
-  try { db.exec('ALTER TABLE plans ADD COLUMN pdf_download_limit INTEGER NOT NULL DEFAULT 20;'); } catch {}
+  try { db.exec('ALTER TABLE plans ADD COLUMN pdf_download_limit INTEGER NOT NULL DEFAULT 30;'); } catch {}
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_download_limit INTEGER NOT NULL DEFAULT 2;'); } catch {}
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_downloads_used INTEGER NOT NULL DEFAULT 0;'); } catch {}
 
-  // Update plan prices and PDF download limits to exact requested rates: 1M=249 (20), 3M=649 (60), 6M=1099 (120)
+  // Update plan prices, names, and PDF download limits: Basic=299 (30), Standard=849 (90), Premium=1699 (180)
   try {
-    db.prepare("UPDATE plans SET price_inr = 249, pdf_download_limit = 20 WHERE id = 'plan_1m'").run();
-    db.prepare("UPDATE plans SET price_inr = 649, pdf_download_limit = 60 WHERE id = 'plan_3m'").run();
-    db.prepare("UPDATE plans SET price_inr = 1099, pdf_download_limit = 120 WHERE id = 'plan_6m'").run();
+    db.prepare("UPDATE plans SET name = 'Basic', price_inr = 299, pdf_download_limit = 30 WHERE id = 'plan_1m'").run();
+    db.prepare("UPDATE plans SET name = 'Standard', price_inr = 849, pdf_download_limit = 90 WHERE id = 'plan_3m'").run();
+    db.prepare("UPDATE plans SET name = 'Premium', price_inr = 1699, pdf_download_limit = 180 WHERE id = 'plan_6m'").run();
   } catch {
     // ignore
   }
@@ -334,13 +349,13 @@ function initDatabase(db: DatabaseSync) {
 
     insertPlan.run(
       'plan_1m',
-      '1 Month',
+      'Basic',
       1,
-      249,
-      20,
+      299,
+      30,
       'Flexible monthly billing for growing businesses.',
       JSON.stringify([
-        '20 Total PDF Downloads',
+        '30 Total PDF Downloads',
         'Unlimited Quotations & Invoices',
         'All Curated Design Templates',
         'Customer Directory Management',
@@ -356,14 +371,14 @@ function initDatabase(db: DatabaseSync) {
 
     insertPlan.run(
       'plan_3m',
-      '3 Months',
+      'Standard',
       3,
-      649,
-      60,
+      849,
+      90,
       'Quarterly subscription with significant savings.',
       JSON.stringify([
-        '60 Total PDF Downloads',
-        'Everything in 1 Month Plan',
+        '90 Total PDF Downloads',
+        'Everything in Basic Plan',
         'Save vs Monthly Subscription',
         'Custom Logo & Business Branding',
         'Item & Service Rate Catalog',
@@ -378,14 +393,14 @@ function initDatabase(db: DatabaseSync) {
 
     insertPlan.run(
       'plan_6m',
-      '6 Months',
+      'Premium',
       6,
-      1099,
-      120,
+      1699,
+      180,
       'Best value for established contractors and agencies.',
       JSON.stringify([
-        '120 Total PDF Downloads',
-        'Everything in 3 Months Plan',
+        '180 Total PDF Downloads',
+        'Everything in Standard Plan',
         'Highest Overall Cost Savings',
         'All Premium Current & Future Templates',
         'Direct UPI & Bank QR Display',
@@ -533,7 +548,7 @@ export function getAllPlans(includeInactive = false): SubscriptionPlan[] {
     name: r.name,
     durationMonths: r.duration_months,
     priceINR: r.price_inr,
-    pdfDownloadLimit: Number(r.pdf_download_limit ?? (r.id === 'plan_1m' ? 20 : r.id === 'plan_3m' ? 60 : r.id === 'plan_6m' ? 120 : 20)),
+    pdfDownloadLimit: Number(r.pdf_download_limit ?? (r.id === 'plan_1m' ? 30 : r.id === 'plan_3m' ? 90 : r.id === 'plan_6m' ? 180 : 30)),
     description: r.description,
     features: JSON.parse(r.features_json || '[]'),
     isActive: Boolean(r.is_active),
@@ -551,7 +566,7 @@ export function getPlanById(id: string): SubscriptionPlan | null {
     name: row.name,
     durationMonths: row.duration_months,
     priceINR: row.price_inr,
-    pdfDownloadLimit: Number(row.pdf_download_limit ?? (row.id === 'plan_1m' ? 20 : row.id === 'plan_3m' ? 60 : row.id === 'plan_6m' ? 120 : 20)),
+    pdfDownloadLimit: Number(row.pdf_download_limit ?? (row.id === 'plan_1m' ? 30 : row.id === 'plan_3m' ? 90 : row.id === 'plan_6m' ? 180 : 30)),
     description: row.description,
     features: JSON.parse(row.features_json || '[]'),
     isActive: Boolean(row.is_active),
@@ -789,14 +804,33 @@ export interface VerifyPdfDownloadResult {
   message?: string;
 }
 
+export interface VerifyPdfDownloadOptions {
+  docId?: string;
+  documentType?: 'QUOTATION' | 'INVOICE' | 'OTHER';
+  documentNumber?: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
 /**
- * Authoritatively verifies and consumes 1 PDF download based on the customer's current subscription plan.
- * Controlled strictly server-side.
+ * Authoritatively verifies and consumes exactly 1 PDF credit based on the customer's current subscription plan.
+ * Controlled strictly server-side with atomic transaction locks.
  */
-export function verifyAndConsumeTrialPdfDownload(userId: string): VerifyPdfDownloadResult {
+export function verifyAndConsumeTrialPdfDownload(
+  userId: string,
+  options?: string | VerifyPdfDownloadOptions
+): VerifyPdfDownloadResult {
   const db = getDatabase();
-  const userRow = db.prepare('SELECT status FROM users WHERE id = ?').get(userId) as any;
+  const userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
   const subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+
+  const opts: VerifyPdfDownloadOptions =
+    typeof options === 'string' ? { docId: options } : options || {};
+  const docId = opts.docId;
+  const documentType = opts.documentType || 'QUOTATION';
+  const documentNumber = opts.documentNumber;
+  const ipAddress = opts.ipAddress;
+  const userAgent = opts.userAgent;
 
   if (!subRow) {
     return {
@@ -838,7 +872,7 @@ export function verifyAndConsumeTrialPdfDownload(userId: string): VerifyPdfDownl
   const isSubscribed = evaluated.effectiveStatus === 'ACTIVE';
   const plan = getPlanById(subRow.plan_id);
   const planDefaultLimit = isSubscribed
-    ? (plan?.pdfDownloadLimit || (subRow.plan_id === 'plan_1m' ? 20 : subRow.plan_id === 'plan_3m' ? 60 : subRow.plan_id === 'plan_6m' ? 120 : 20))
+    ? (plan?.pdfDownloadLimit || (subRow.plan_id === 'plan_1m' ? 30 : subRow.plan_id === 'plan_3m' ? 90 : subRow.plan_id === 'plan_6m' ? 180 : 30))
     : 2;
 
   const pdfDownloadLimit = Number(subRow.pdf_download_limit ?? planDefaultLimit);
@@ -852,12 +886,12 @@ export function verifyAndConsumeTrialPdfDownload(userId: string): VerifyPdfDownl
       pdfDownloadLimit,
       pdfDownloadsUsed,
       pdfDownloadsRemaining: 0,
-      trialPdfDownloads: pdfDownloadsUsed,
+      trialPdfDownloads: Number(subRow.trial_pdf_downloads) || 0,
       maxTrialDownloads: pdfDownloadLimit,
       isSubscribed,
       message: isSubscribed
-        ? `You have reached your plan limit of ${pdfDownloadLimit} PDF downloads. Please renew or upgrade your plan to unlock more downloads.`
-        : "You've used your 2 free PDF downloads. Upgrade to Easyworks to unlock more PDF downloads.",
+        ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
+        : "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs.",
     };
   }
 
@@ -882,35 +916,105 @@ export function verifyAndConsumeTrialPdfDownload(userId: string): VerifyPdfDownl
           trialPdfDownloads: clusterDownloads.total,
           maxTrialDownloads: 2,
           isSubscribed: false,
-          message: "The 2 free PDF download limit has been reached for this verified phone identity. Please upgrade to Easyworks to unlock more PDF downloads.",
+          message: "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs.",
         };
       }
     }
   }
 
-  // 3. Allowed: Atomically increment PDF downloads count by 1 server-side
-  const updatedUsed = pdfDownloadsUsed + 1;
-  const updatedRemaining = Math.max(0, pdfDownloadLimit - updatedUsed);
+  // 3. Retry debounce protection (Requirement 20: Do not allow same PDF export to consume multiple credits on retry)
+  if (docId) {
+    const thirtySecsAgo = new Date(Date.now() - 30 * 1000).toISOString();
+    const recentDownload = db.prepare(`
+      SELECT * FROM pdf_usage_logs
+      WHERE user_id = ? AND document_id = ? AND created_at >= ?
+      ORDER BY created_at DESC LIMIT 1
+    `).get(userId, docId, thirtySecsAgo) as any;
+
+    if (recentDownload) {
+      return {
+        allowed: true,
+        pdfDownloadLimit,
+        pdfDownloadsUsed,
+        pdfDownloadsRemaining: Math.max(0, pdfDownloadLimit - pdfDownloadsUsed),
+        trialPdfDownloads: Number(subRow.trial_pdf_downloads) || 0,
+        maxTrialDownloads: pdfDownloadLimit,
+        isSubscribed,
+      };
+    }
+  }
+
+  // 4. ATOMIC PDF CREDIT CONSUMPTION (Requirement 16):
+  // Atomically increment ONLY if pdf_downloads_used < pdf_download_limit.
+  // This guarantees race-condition immunity under concurrent requests.
   const nowISO = new Date().toISOString();
+  let updatedUsed = pdfDownloadsUsed;
 
-  const trialDownloads = isSubscribed
-    ? (Number(subRow.trial_pdf_downloads) || 0)
-    : updatedUsed;
-
-  db.prepare(`
+  const updateResult = db.prepare(`
     UPDATE subscriptions
-    SET pdf_downloads_used = ?, trial_pdf_downloads = ?, updated_at = ?
-    WHERE user_id = ?
-  `).run(updatedUsed, trialDownloads, nowISO, userId);
+    SET pdf_downloads_used = pdf_downloads_used + 1,
+        trial_pdf_downloads = CASE WHEN status = 'TRIALING' THEN trial_pdf_downloads + 1 ELSE trial_pdf_downloads END,
+        updated_at = ?
+    WHERE user_id = ? AND pdf_downloads_used < pdf_download_limit
+  `).run(nowISO, userId);
 
-  logActivity(userId, 'PDF_DOWNLOAD_CONSUMED', `PDF download consumed (${updatedUsed}/${pdfDownloadLimit})`, 'USER');
+  if (updateResult.changes === 0) {
+    return {
+      allowed: false,
+      reason: 'LIMIT_REACHED',
+      pdfDownloadLimit,
+      pdfDownloadsUsed,
+      pdfDownloadsRemaining: 0,
+      trialPdfDownloads: Number(subRow.trial_pdf_downloads) || 0,
+      maxTrialDownloads: pdfDownloadLimit,
+      isSubscribed,
+      message: isSubscribed
+        ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
+        : "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs.",
+    };
+  }
+
+  // Re-read updated counter
+  const freshSub = db.prepare('SELECT pdf_downloads_used, trial_pdf_downloads FROM subscriptions WHERE user_id = ?').get(userId) as any;
+  updatedUsed = freshSub ? Number(freshSub.pdf_downloads_used) : pdfDownloadsUsed + 1;
+  const updatedRemaining = Math.max(0, pdfDownloadLimit - updatedUsed);
+
+  // 5. Record in PDF Usage History (Requirement 15)
+  const logId = 'pdf_log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+  try {
+    db.prepare(`
+      INSERT INTO pdf_usage_logs (
+        id, user_id, business_name, document_id, document_type, document_number, subscription_id, ip_address, user_agent, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      logId,
+      userId,
+      userRow?.business_name || null,
+      docId || null,
+      documentType,
+      documentNumber || null,
+      subRow.id,
+      ipAddress || null,
+      userAgent || null,
+      nowISO
+    );
+  } catch (e) {
+    console.error('Error logging PDF usage history:', e);
+  }
+
+  logActivity(
+    userId,
+    'PDF_DOWNLOAD_CONSUMED',
+    `PDF credit consumed (${updatedUsed}/${pdfDownloadLimit}) for ${documentType} ${documentNumber ? '#' + documentNumber : ''}`,
+    'USER'
+  );
 
   return {
     allowed: true,
     pdfDownloadLimit,
     pdfDownloadsUsed: updatedUsed,
     pdfDownloadsRemaining: updatedRemaining,
-    trialPdfDownloads: trialDownloads,
+    trialPdfDownloads: Number(freshSub?.trial_pdf_downloads) || updatedUsed,
     maxTrialDownloads: pdfDownloadLimit,
     isSubscribed,
   };
@@ -988,10 +1092,10 @@ export function activateSubscription({
   const startISO = newStart.toISOString();
   const endISO = newEnd.toISOString();
 
-  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 20 : plan.id === 'plan_3m' ? 60 : plan.id === 'plan_6m' ? 120 : 20);
-  // Renewal of same active plan adds the plan quota to existing limit and keeps used; upgrade/downgrade or graduating from trial sets fresh usage (used = 0)
-  const newPdfLimit = isSamePlanRenewal ? (Number(existing.pdfDownloadLimit || 0) + planPdfLimit) : planPdfLimit;
-  const newPdfUsed = isSamePlanRenewal ? Number(existing.pdfDownloadsUsed || 0) : 0;
+  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 30 : plan.id === 'plan_3m' ? 90 : plan.id === 'plan_6m' ? 180 : 30);
+  // When a subscription is renewed or upgraded, create/reset the PDF allowance for the new period (Requirement 12 & 13)
+  const newPdfLimit = planPdfLimit;
+  const newPdfUsed = 0;
 
   runInTransaction(() => {
     db.prepare(`
@@ -2303,9 +2407,24 @@ export function getDeveloperStats(): DeveloperStats {
   let trialCustomers = 0;
   let expiredCustomers = 0;
   let totalPdfs = 0;
+  let customersAtLimit = 0;
+  let customersNearLimit = 0;
+  let trialPdfsUsed = 0;
 
   subs.forEach((s) => {
-    totalPdfs += s.trial_pdf_downloads || 0;
+    const used = Number(s.pdf_downloads_used ?? s.trial_pdf_downloads ?? 0);
+    const limit = Number(s.pdf_download_limit ?? 2);
+    totalPdfs += used;
+    trialPdfsUsed += (s.trial_pdf_downloads || 0);
+
+    if (limit > 0) {
+      if (used >= limit) {
+        customersAtLimit++;
+      } else if (used / limit >= 0.8) {
+        customersNearLimit++;
+      }
+    }
+
     const evaluated = evaluateSubscriptionStatus({
       status: s.status,
       trialEndsAt: s.trial_ends_at,
@@ -2315,6 +2434,18 @@ export function getDeveloperStats(): DeveloperStats {
     else if (evaluated.effectiveStatus === 'TRIALING') trialCustomers++;
     else if (evaluated.effectiveStatus === 'EXPIRED') expiredCustomers++;
   });
+
+  // PDF usage from pdf_usage_logs table
+  const todayPrefix = nowISO.split('T')[0];
+  const monthPrefix = todayPrefix.substring(0, 7);
+
+  const pdfCountRow = db.prepare('SELECT COUNT(*) as count FROM pdf_usage_logs').get() as any;
+  const pdfTodayRow = db.prepare('SELECT COUNT(*) as count FROM pdf_usage_logs WHERE created_at LIKE ?').get(`${todayPrefix}%`) as any;
+  const pdfMonthRow = db.prepare('SELECT COUNT(*) as count FROM pdf_usage_logs WHERE created_at LIKE ?').get(`${monthPrefix}%`) as any;
+
+  const pdfsGenerated = Math.max(pdfCountRow?.count || 0, totalPdfs);
+  const pdfsGeneratedToday = pdfTodayRow?.count || 0;
+  const pdfsGeneratedThisMonth = pdfMonthRow?.count || 0;
 
   // Manual payment requests
   const pendingMprRow = db.prepare("SELECT COUNT(*) as count FROM manual_payment_requests WHERE status = 'PENDING'").get() as any;
@@ -2328,7 +2459,6 @@ export function getDeveloperStats(): DeveloperStats {
   const totalRevenueINR = revenueRow && revenueRow.sum ? Number(revenueRow.sum) : 0;
 
   // Active today (users created or with activity today)
-  const todayPrefix = nowISO.split('T')[0];
   const activeTodayRow = db.prepare(`
     SELECT COUNT(DISTINCT user_id) as count FROM activity_logs WHERE created_at LIKE ?
   `).get(`${todayPrefix}%`) as any;
@@ -2355,7 +2485,12 @@ export function getDeveloperStats(): DeveloperStats {
     paymentPending,
     paymentVerified,
     totalRevenueINR,
-    pdfsGenerated: totalPdfs,
+    pdfsGenerated,
+    pdfsGeneratedToday,
+    pdfsGeneratedThisMonth,
+    customersAtLimit,
+    customersNearLimit,
+    trialPdfsUsed,
     activeToday,
     newCustomers,
     recentPayments,
@@ -2400,7 +2535,7 @@ export function getAllCustomersWithDetails(filter?: string, search?: string): De
     const effectiveSubStatus = isSuspended ? 'SUSPENDED' : evaluated.effectiveStatus;
     const isSubscribed = effectiveSubStatus === 'ACTIVE';
     const planLimit = isSubscribed
-      ? (r.plan_pdf_download_limit || (r.plan_id === 'plan_1m' ? 20 : r.plan_id === 'plan_3m' ? 60 : r.plan_id === 'plan_6m' ? 120 : 20))
+      ? (r.plan_pdf_download_limit || (r.plan_id === 'plan_1m' ? 30 : r.plan_id === 'plan_3m' ? 90 : r.plan_id === 'plan_6m' ? 180 : 30))
       : 2;
     const pdfDownloadLimit = Number(r.pdf_download_limit ?? planLimit);
     const pdfDownloadsUsed = Number(r.pdf_downloads_used ?? r.trial_pdf_downloads ?? 0);
@@ -2453,12 +2588,29 @@ export function getAllCustomersWithDetails(filter?: string, search?: string): De
   if (filter && filter !== 'all') {
     if (filter === 'active') {
       result = result.filter((c) => c.subscription?.status === 'ACTIVE' && c.status === 'ACTIVE');
-    } else if (filter === 'trialing') {
+    } else if (filter === 'trialing' || filter === 'trial') {
       result = result.filter((c) => c.subscription?.status === 'TRIALING' && c.status === 'ACTIVE');
     } else if (filter === 'expired') {
       result = result.filter((c) => c.subscription?.status === 'EXPIRED');
     } else if (filter === 'suspended') {
       result = result.filter((c) => c.status === 'SUSPENDED');
+    } else if (filter === 'near_limit') {
+      result = result.filter((c) =>
+        Boolean(
+          c.subscription &&
+          c.subscription.pdfDownloadLimit > 0 &&
+          c.subscription.pdfDownloadsRemaining > 0 &&
+          (c.subscription.pdfDownloadsUsed / c.subscription.pdfDownloadLimit) >= 0.8
+        )
+      );
+    } else if (filter === 'limit_reached') {
+      result = result.filter((c) =>
+        Boolean(
+          c.subscription &&
+          c.subscription.pdfDownloadLimit > 0 &&
+          c.subscription.pdfDownloadsUsed >= c.subscription.pdfDownloadLimit
+        )
+      );
     } else if (filter === 'payment_pending') {
       const pendingUserIds = new Set(
         (db.prepare("SELECT user_id FROM manual_payment_requests WHERE status = 'PENDING'").all() as any[]).map(
@@ -2485,6 +2637,7 @@ export function getCustomerFullDetails(userId: string): any {
   const manualPayments = db.prepare('SELECT * FROM manual_payment_requests WHERE user_id = ? ORDER BY created_at DESC').all(userId);
   const trialIdentity = db.prepare('SELECT * FROM trial_identities WHERE user_id = ?').get(userId);
   const activity = db.prepare('SELECT * FROM activity_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(userId);
+  const pdfUsageHistory = getCustomerPdfUsageHistory(userId);
 
   return {
     user: {
@@ -2505,6 +2658,7 @@ export function getCustomerFullDetails(userId: string): any {
     manualPayments,
     trialIdentity,
     activity,
+    pdfUsageHistory,
   };
 }
 
@@ -2757,6 +2911,96 @@ export function resetCustomerPdfUsage(userId: string): Subscription | null {
   );
 
   return getUserSubscription(userId);
+}
+
+export function removeCustomerPdfCredits(userId: string, amount: number): Subscription | null {
+  const db = getDatabase();
+  const currentSub = getUserSubscription(userId);
+  if (!currentSub) return null;
+
+  const removeNum = Math.max(1, Number(amount) || 1);
+  const newLimit = Math.max(currentSub.pdfDownloadsUsed, (currentSub.pdfDownloadLimit || 0) - removeNum);
+  const actualRemoved = (currentSub.pdfDownloadLimit || 0) - newLimit;
+  const nowISO = new Date().toISOString();
+
+  runInTransaction(() => {
+    db.prepare(`
+      UPDATE subscriptions
+      SET pdf_download_limit = ?, updated_at = ?
+      WHERE user_id = ?
+    `).run(newLimit, nowISO, userId);
+  });
+
+  logActivity(
+    userId,
+    'PDF_CREDITS_REMOVED',
+    `Developer removed ${actualRemoved} PDF credits (new limit: ${newLimit}, used: ${currentSub.pdfDownloadsUsed})`,
+    'SUPER_ADMIN'
+  );
+
+  return getUserSubscription(userId);
+}
+
+export function getCustomerPdfUsageHistory(userId: string): any[] {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT * FROM pdf_usage_logs
+    WHERE user_id = ?
+    ORDER BY created_at DESC
+  `).all(userId) as any[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.user_id,
+    user_id: r.user_id,
+    businessName: r.business_name,
+    business_name: r.business_name,
+    documentId: r.document_id,
+    document_id: r.document_id,
+    documentType: r.document_type,
+    document_type: r.document_type,
+    documentNumber: r.document_number,
+    document_number: r.document_number,
+    subscriptionId: r.subscription_id,
+    subscription_id: r.subscription_id,
+    ipAddress: r.ip_address,
+    ip_address: r.ip_address,
+    userAgent: r.user_agent,
+    user_agent: r.user_agent,
+    createdAt: r.created_at,
+    created_at: r.created_at,
+  }));
+}
+
+export function getAllPdfUsageHistory(limit = 100): any[] {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT * FROM pdf_usage_logs
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit) as any[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.user_id,
+    user_id: r.user_id,
+    businessName: r.business_name,
+    business_name: r.business_name,
+    documentId: r.document_id,
+    document_id: r.document_id,
+    documentType: r.document_type,
+    document_type: r.document_type,
+    documentNumber: r.document_number,
+    document_number: r.document_number,
+    subscriptionId: r.subscription_id,
+    subscription_id: r.subscription_id,
+    ipAddress: r.ip_address,
+    ip_address: r.ip_address,
+    userAgent: r.user_agent,
+    user_agent: r.user_agent,
+    createdAt: r.created_at,
+    created_at: r.created_at,
+  }));
 }
 
 export function resetCustomerAccess(userId: string): { success: boolean; message: string } {

@@ -91,7 +91,7 @@ export default function TrialExpiredModal({ isOpen, onClose }: TrialExpiredModal
         {/* Footer Guarantee */}
         <div className="mt-4 pt-3 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-center gap-1.5 text-[11px] text-slate-500 dark:text-zinc-500">
           <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
-          <span>Direct UPI & Bank Transfer • Up to 120 PDF downloads</span>
+          <span>Direct UPI & Bank Transfer • Up to 180 PDF downloads</span>
         </div>
 
       </div>

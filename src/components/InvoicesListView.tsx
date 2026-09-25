@@ -27,6 +27,8 @@ export default function InvoicesListView() {
     updateInvoiceStatus,
     business,
     requestPdfDownload,
+    subscription,
+    setDownloadLimitModalOpen,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,8 +44,14 @@ export default function InvoicesListView() {
     return matchesSearch && matchesStatus;
   });
 
+  const isLimitReached = (subscription?.pdfDownloadsRemaining ?? 1) <= 0;
+
   const handleDownload = async (inv: Invoice) => {
-    const allowed = await requestPdfDownload('invoice', inv.id);
+    if (isLimitReached) {
+      setDownloadLimitModalOpen(true);
+      return;
+    }
+    const allowed = await requestPdfDownload('invoice', inv.id, inv.invoiceNumber);
     if (!allowed) return;
     const doc = generateInvoicePDF(inv, business);
     doc.save(`${inv.invoiceNumber}.pdf`);
@@ -233,11 +241,19 @@ export default function InvoicesListView() {
 
                         <button
                           onClick={() => handleDownload(inv)}
-                          className="h-8 px-2.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-lg text-slate-700 dark:text-zinc-200 font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                          title="Download PDF"
+                          className={`h-8 px-2.5 rounded-lg font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
+                            isLimitReached
+                              ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60'
+                              : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200'
+                          }`}
+                          title={
+                            isLimitReached
+                              ? "You've reached your PDF download limit for this subscription. Upgrade or renew your plan to continue."
+                              : "Download PDF"
+                          }
                         >
                           <Download className="w-3.5 h-3.5" />
-                          <span>PDF</span>
+                          <span>{isLimitReached ? 'Limit' : 'PDF'}</span>
                         </button>
 
                         {inv.status !== 'paid' && (

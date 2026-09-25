@@ -692,7 +692,7 @@ export default function AuthModal() {
 
                 <div className="p-3 mb-4 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300">
                   <p className="font-semibold text-slate-900 dark:text-white mb-1">Upgrade to Continue</p>
-                  Get unlimited quotations, invoices, templates, and up to 120 PDF downloads starting at just ₹249.
+                  Get unlimited quotations, invoices, templates, and up to 180 PDF downloads starting at just ₹299.
                 </div>
 
                 <div className="space-y-2">
@@ -703,7 +703,7 @@ export default function AuthModal() {
                     }}
                     className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
                   >
-                    Select Plan (Starting at ₹249)
+                    Select Plan (Starting at ₹299)
                   </button>
 
                   <button

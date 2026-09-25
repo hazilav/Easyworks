@@ -4,7 +4,7 @@ import { verifyAndConsumeTrialPdfDownload } from '@/lib/db/database';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, documentType, documentId } = body;
+    const { userId, documentType, documentId, documentNumber } = body;
 
     if (!userId) {
       return NextResponse.json(
@@ -13,7 +13,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = verifyAndConsumeTrialPdfDownload(userId);
+    const ipAddress =
+      req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+      req.headers.get('x-real-ip') ||
+      undefined;
+    const userAgent = req.headers.get('user-agent') || undefined;
+
+    const result = verifyAndConsumeTrialPdfDownload(userId, {
+      docId: documentId,
+      documentType: (documentType || 'QUOTATION').toUpperCase() as any,
+      documentNumber,
+      ipAddress,
+      userAgent,
+    });
 
     if (!result.allowed) {
       return NextResponse.json(
@@ -22,7 +34,12 @@ export async function POST(req: NextRequest) {
           reason: result.reason,
           message:
             result.message ||
-            "You've used all PDF downloads included in your plan. Please upgrade or renew to unlock more PDF downloads.",
+            (result.isSubscribed
+              ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
+              : "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs."),
+          pdfLimit: result.pdfDownloadLimit,
+          pdfUsed: result.pdfDownloadsUsed,
+          pdfRemaining: result.pdfDownloadsRemaining,
           pdfDownloadLimit: result.pdfDownloadLimit,
           pdfDownloadsUsed: result.pdfDownloadsUsed,
           pdfDownloadsRemaining: result.pdfDownloadsRemaining,
@@ -36,6 +53,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       allowed: true,
+      pdfLimit: result.pdfDownloadLimit,
+      pdfUsed: result.pdfDownloadsUsed,
+      pdfRemaining: result.pdfDownloadsRemaining,
       pdfDownloadLimit: result.pdfDownloadLimit,
       pdfDownloadsUsed: result.pdfDownloadsUsed,
       pdfDownloadsRemaining: result.pdfDownloadsRemaining,

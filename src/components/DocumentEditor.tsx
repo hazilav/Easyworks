@@ -64,6 +64,8 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
     quotations,
     invoices,
     requestPdfDownload,
+    subscription,
+    setDownloadLimitModalOpen,
   } = useApp();
 
   const isQuotation = documentType === 'quotation';
@@ -333,7 +335,15 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
   const handleDownloadPDF = async () => {
     try {
       handleSave();
-      const allowed = await requestPdfDownload(isQuotation ? 'quotation' : 'invoice', docData.id);
+      const docNumber = isQuotation
+        ? (docData as Quotation).quotationNumber
+        : (docData as Invoice).invoiceNumber;
+
+      const allowed = await requestPdfDownload(
+        isQuotation ? 'quotation' : 'invoice',
+        docData.id,
+        docNumber
+      );
       if (!allowed) return;
 
       if (isQuotation) {
@@ -352,9 +362,7 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
 
   const handlePrint = async () => {
     try {
-      const allowed = await requestPdfDownload(isQuotation ? 'quotation' : 'invoice', docData.id);
-      if (!allowed) return;
-
+      // Browser print does NOT consume PDF credit (Requirement 7)
       const doc = isQuotation
         ? generateQuotationPDF(docData as Quotation, business)
         : generateInvoicePDF(docData as Invoice, business);
@@ -481,13 +489,33 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
           </button>
 
           {/* Download PDF Button */}
-          <button
-            onClick={handleDownloadPDF}
-            className="flex items-center space-x-1 sm:space-x-1.5 h-9 px-2.5 sm:h-10 sm:px-3.5 bg-slate-900 dark:bg-zinc-100 hover:bg-slate-800 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-semibold rounded-xl shadow-sm transition-all cursor-pointer active:scale-98 shrink-0"
-          >
-            <Download className="w-4 h-4" />
-            <span>PDF</span>
-          </button>
+          {(() => {
+            const isLimitReached = (subscription?.pdfDownloadsRemaining ?? 1) <= 0;
+            return (
+              <button
+                onClick={() => {
+                  if (isLimitReached) {
+                    setDownloadLimitModalOpen(true);
+                  } else {
+                    handleDownloadPDF();
+                  }
+                }}
+                title={
+                  isLimitReached
+                    ? "You've reached your PDF download limit for this subscription. Upgrade or renew your plan to continue."
+                    : "Download PDF"
+                }
+                className={`flex items-center space-x-1 sm:space-x-1.5 h-9 px-2.5 sm:h-10 sm:px-3.5 text-xs font-semibold rounded-xl shadow-sm transition-all cursor-pointer active:scale-98 shrink-0 ${
+                  isLimitReached
+                    ? 'bg-rose-100 hover:bg-rose-200 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                    : 'bg-slate-900 dark:bg-zinc-100 hover:bg-slate-800 dark:hover:bg-white text-white dark:text-zinc-900'
+                }`}
+              >
+                <Download className="w-4 h-4" />
+                <span>{isLimitReached ? 'PDF Limit Reached' : 'Download PDF'}</span>
+              </button>
+            );
+          })()}
 
           {/* Save Button */}
           <button

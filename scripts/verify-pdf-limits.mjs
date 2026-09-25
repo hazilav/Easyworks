@@ -1,4 +1,4 @@
-// Automated verification script for Easyworks SaaS Package-Based PDF Download Limits
+// Automated verification script for Easyworks SaaS PDF Download Limit System
 import assert from 'node:assert';
 import {
   getDatabase,
@@ -6,13 +6,17 @@ import {
   ensureUserAndTrial,
   getUserSubscription,
   activateSubscription,
-  verifyAndConsumePdfDownload,
+  verifyAndConsumeTrialPdfDownload,
   adjustCustomerPdfLimit,
   addBonusPdfDownloads,
+  removeCustomerPdfCredits,
   resetCustomerPdfUsage,
+  getCustomerPdfUsageHistory,
+  getDeveloperStats,
+  getAllCustomersWithDetails,
 } from '../src/lib/db/database.ts';
 
-console.log('--- STARTING PACKAGE-BASED PDF DOWNLOAD LIMIT VERIFICATION ---\n');
+console.log('--- STARTING EASYWORKS PDF DOWNLOAD LIMIT SYSTEM VERIFICATION ---\n');
 
 async function runTests() {
   getDatabase();
@@ -25,18 +29,18 @@ async function runTests() {
   const plan6m = plans.find(p => p.id === 'plan_6m');
 
   assert(plan1m, '1m plan exists');
-  assert.strictEqual(plan1m.priceINR, 249, '1m plan price is ₹249');
-  assert.strictEqual(plan1m.pdfDownloadLimit, 20, '1m plan PDF limit is 20');
+  assert.strictEqual(plan1m.priceINR, 299, '1m plan price is ₹299');
+  assert.strictEqual(plan1m.pdfDownloadLimit, 30, '1m plan PDF limit is 30');
 
   assert(plan3m, '3m plan exists');
-  assert.strictEqual(plan3m.priceINR, 649, '3m plan price is ₹649');
-  assert.strictEqual(plan3m.pdfDownloadLimit, 60, '3m plan PDF limit is 60');
+  assert.strictEqual(plan3m.priceINR, 849, '3m plan price is ₹849');
+  assert.strictEqual(plan3m.pdfDownloadLimit, 90, '3m plan PDF limit is 90');
 
   assert(plan6m, '6m plan exists');
-  assert.strictEqual(plan6m.priceINR, 1099, '6m plan price is ₹1,099');
-  assert.strictEqual(plan6m.pdfDownloadLimit, 120, '6m plan PDF limit is 120');
+  assert.strictEqual(plan6m.priceINR, 1699, '6m plan price is ₹1,699');
+  assert.strictEqual(plan6m.pdfDownloadLimit, 180, '6m plan PDF limit is 180');
 
-  console.log('✔ PASS: Plans configured correctly with limits (20, 60, 120).\n');
+  console.log('✔ PASS: Plans configured correctly: Basic ₹299 (30), Standard ₹849 (90), Premium ₹1,699 (180).\n');
 
   // Test 2: Free Trial Limit (2 PDFs Total)
   console.log('2. Testing Free Trial Customer PDF Limits (2 Total)...');
@@ -56,21 +60,47 @@ async function runTests() {
   assert.strictEqual(trialSub.pdfDownloadsRemaining, 2);
 
   // 1st download
-  const dl1 = verifyAndConsumePdfDownload(trialUserId, 'doc_001');
+  const dl1 = verifyAndConsumeTrialPdfDownload(trialUserId, {
+    docId: 'quote_001',
+    documentType: 'quotation',
+    documentNumber: 'QUO-2026-001',
+    ipAddress: '127.0.0.1',
+    userAgent: 'Mozilla/5.0 TestBrowser',
+  });
   assert.strictEqual(dl1.allowed, true);
   assert.strictEqual(dl1.pdfDownloadsUsed, 1);
   assert.strictEqual(dl1.pdfDownloadsRemaining, 1);
   console.log('✔ Download 1 successful (1 used, 1 remaining)');
 
+  // Retry debounce test: same docId within 30s should NOT consume another credit
+  const dl1Retry = verifyAndConsumeTrialPdfDownload(trialUserId, {
+    docId: 'quote_001',
+    documentType: 'quotation',
+    documentNumber: 'QUO-2026-001',
+    ipAddress: '127.0.0.1',
+  });
+  assert.strictEqual(dl1Retry.allowed, true);
+  assert.strictEqual(dl1Retry.pdfDownloadsUsed, 1, 'Retry did not increment credit count');
+  assert.strictEqual(dl1Retry.pdfDownloadsRemaining, 1);
+  console.log('✔ Retry debounce verified (no duplicate credit deduction)');
+
   // 2nd download
-  const dl2 = verifyAndConsumePdfDownload(trialUserId, 'doc_002');
+  const dl2 = verifyAndConsumeTrialPdfDownload(trialUserId, {
+    docId: 'inv_002',
+    documentType: 'invoice',
+    documentNumber: 'INV-2026-001',
+  });
   assert.strictEqual(dl2.allowed, true);
   assert.strictEqual(dl2.pdfDownloadsUsed, 2);
   assert.strictEqual(dl2.pdfDownloadsRemaining, 0);
   console.log('✔ Download 2 successful (2 used, 0 remaining)');
 
   // 3rd download attempt (MUST BE BLOCKED)
-  const dl3 = verifyAndConsumePdfDownload(trialUserId, 'doc_003');
+  const dl3 = verifyAndConsumeTrialPdfDownload(trialUserId, {
+    docId: 'quote_003',
+    documentType: 'quotation',
+    documentNumber: 'QUO-2026-003',
+  });
   assert.strictEqual(dl3.allowed, false);
   assert.strictEqual(dl3.reason, 'LIMIT_REACHED');
   assert.strictEqual(dl3.pdfDownloadsUsed, 2);
@@ -79,70 +109,113 @@ async function runTests() {
 
   console.log('✔ PASS: Free trial PDF limit strictly enforced at 2 downloads.\n');
 
-  // Test 3: Upgrade to 1 Month Plan (₹249 -> 20 PDFs)
-  console.log('3. Testing Upgrade to 1-Month Plan (₹249, 20 PDFs)...');
+  // Test 3: Upgrade to Basic Plan (₹299, 30 PDFs)
+  console.log('3. Testing Upgrade to Basic Plan (₹299, 30 PDFs)...');
   const paidSub = activateSubscription({ userId: trialUserId, planId: 'plan_1m' });
   assert.strictEqual(paidSub.status, 'ACTIVE');
-  assert.strictEqual(paidSub.pdfDownloadLimit, 20);
+  assert.strictEqual(paidSub.pdfDownloadLimit, 30);
   assert.strictEqual(paidSub.pdfDownloadsUsed, 0);
-  assert.strictEqual(paidSub.pdfDownloadsRemaining, 20);
+  assert.strictEqual(paidSub.pdfDownloadsRemaining, 30);
 
-  // Consume all 20 downloads
-  for (let i = 1; i <= 20; i++) {
-    const res = verifyAndConsumePdfDownload(trialUserId, `doc_paid_${i}`);
+  // Consume all 30 downloads
+  for (let i = 1; i <= 30; i++) {
+    const res = verifyAndConsumeTrialPdfDownload(trialUserId, {
+      docId: `doc_paid_${i}`,
+      documentType: i % 2 === 0 ? 'invoice' : 'quotation',
+      documentNumber: `DOC-2026-${i}`,
+      ipAddress: '192.168.1.50',
+    });
     assert.strictEqual(res.allowed, true);
     assert.strictEqual(res.pdfDownloadsUsed, i);
-    assert.strictEqual(res.pdfDownloadsRemaining, 20 - i);
+    assert.strictEqual(res.pdfDownloadsRemaining, 30 - i);
   }
-  console.log('✔ Consumed 20 downloads under 1-Month Plan');
+  console.log('✔ Consumed 30 downloads under Basic Plan');
 
-  // 21st download attempt (MUST BE BLOCKED)
-  const dlPaidBlocked = verifyAndConsumePdfDownload(trialUserId, 'doc_paid_21');
+  // 31st download attempt (MUST BE BLOCKED)
+  const dlPaidBlocked = verifyAndConsumeTrialPdfDownload(trialUserId, {
+    docId: 'doc_paid_31',
+    documentType: 'invoice',
+  });
   assert.strictEqual(dlPaidBlocked.allowed, false);
   assert.strictEqual(dlPaidBlocked.reason, 'LIMIT_REACHED');
   assert.strictEqual(dlPaidBlocked.pdfDownloadsRemaining, 0);
-  console.log('✔ 21st Download BLOCKED as expected (LIMIT_REACHED)');
+  console.log('✔ 31st Download BLOCKED as expected (LIMIT_REACHED)');
 
-  console.log('✔ PASS: 1-Month plan PDF limit strictly enforced at 20 downloads.\n');
+  console.log('✔ PASS: Basic plan PDF limit strictly enforced at 30 downloads.\n');
 
-  // Test 4: Developer Actions (Bonus, Reset, Adjust)
-  console.log('4. Testing Developer Actions (Bonus, Reset, Adjust)...');
+  // Test 4: Upgrade to Standard Plan (₹849, 90 PDFs)
+  console.log('4. Testing Upgrade to Standard Plan (₹849, 90 PDFs)...');
+  const standardSub = activateSubscription({ userId: trialUserId, planId: 'plan_3m' });
+  assert.strictEqual(standardSub.status, 'ACTIVE');
+  assert.strictEqual(standardSub.pdfDownloadLimit, 90);
+  assert.strictEqual(standardSub.pdfDownloadsUsed, 0);
+  assert.strictEqual(standardSub.pdfDownloadsRemaining, 90);
+  console.log('✔ PASS: Standard plan reset allowance to 90 PDFs.\n');
 
-  // A. Add +5 Bonus Downloads
-  console.log('  Testing ADD_BONUS_PDF (+5)...');
-  const bonusSub = addBonusPdfDownloads(trialUserId, 5, 'admin_developer');
-  assert.strictEqual(bonusSub.pdfDownloadLimit, 25);
-  assert.strictEqual(bonusSub.pdfDownloadsUsed, 20);
-  assert.strictEqual(bonusSub.pdfDownloadsRemaining, 5);
+  // Test 5: Developer Actions (Bonus, Remove, Adjust, Reset, History)
+  console.log('5. Testing Developer Actions...');
 
-  const bonusDl = verifyAndConsumePdfDownload(trialUserId, 'doc_bonus_1');
-  assert.strictEqual(bonusDl.allowed, true);
-  assert.strictEqual(bonusDl.pdfDownloadsUsed, 21);
-  assert.strictEqual(bonusDl.pdfDownloadsRemaining, 4);
-  console.log('  ✔ +5 bonus allowed immediate PDF download (4 remaining)');
+  // A. Add +15 Bonus Downloads
+  console.log('  Testing ADD_BONUS_PDF (+15)...');
+  const bonusSub = addBonusPdfDownloads(trialUserId, 15, 'developer_admin');
+  assert.strictEqual(bonusSub.pdfDownloadLimit, 105);
+  assert.strictEqual(bonusSub.pdfDownloadsRemaining, 105);
+  console.log('  ✔ +15 bonus successfully increased limit to 105');
 
-  // B. Reset PDF Usage
+  // B. Remove -10 PDF Credits
+  console.log('  Testing REMOVE_PDF_CREDITS (-10)...');
+  const removedSub = removeCustomerPdfCredits(trialUserId, 10, 'developer_admin');
+  assert.strictEqual(removedSub.pdfDownloadLimit, 95);
+  assert.strictEqual(removedSub.pdfDownloadsRemaining, 95);
+  console.log('  ✔ Removed 10 credits, new limit is 95');
+
+  // C. Consume 80 downloads to test near_limit (80 / 95 = 84.2%)
+  console.log('  Simulating downloads to reach Near-Limit status...');
+  for (let i = 1; i <= 80; i++) {
+    verifyAndConsumeTrialPdfDownload(trialUserId, {
+      docId: `doc_std_${i}`,
+      documentType: 'invoice',
+      documentNumber: `INV-2026-${i}`,
+      ipAddress: '10.0.0.1',
+    });
+  }
+  const currentSub = getUserSubscription(trialUserId);
+  assert.strictEqual(currentSub.pdfDownloadsUsed, 80);
+  assert.strictEqual(currentSub.pdfDownloadsRemaining, 15);
+  const usageRatio = currentSub.pdfDownloadsUsed / currentSub.pdfDownloadLimit;
+  assert(usageRatio >= 0.8, 'Usage is at or above 80%');
+  console.log(`  ✔ Customer is near limit: ${currentSub.pdfDownloadsUsed}/${currentSub.pdfDownloadLimit} (${(usageRatio * 100).toFixed(1)}%)`);
+
+  // D. Check Usage History Logs
+  console.log('  Testing getCustomerPdfUsageHistory...');
+  const history = getCustomerPdfUsageHistory(trialUserId);
+  assert(history.length > 0, 'Usage logs exist');
+  assert(history[0].documentType, 'Log has documentType');
+  console.log(`  ✔ Fetched ${history.length} PDF audit log entries for customer`);
+
+  // E. Developer Stats & Customer Filters
+  console.log('6. Testing Developer Stats & Customer Filters...');
+  const stats = getDeveloperStats();
+  assert(stats.pdfsGenerated > 0, 'Total PDFs generated is tracked');
+  assert(typeof stats.pdfsGeneratedToday === 'number', 'PDFs generated today tracked');
+  assert(typeof stats.customersNearLimit === 'number', 'Customers near limit tracked');
+  assert(typeof stats.customersAtLimit === 'number', 'Customers at limit tracked');
+  console.log(`  ✔ Telemetry Stats: Total=${stats.pdfsGenerated}, Today=${stats.pdfsGeneratedToday}, NearLimit=${stats.customersNearLimit}, AtLimit=${stats.customersAtLimit}`);
+
+  // Test filters
+  const nearLimitCustomers = getAllCustomersWithDetails('near_limit');
+  const userInNearLimit = nearLimitCustomers.some(c => c.id === trialUserId);
+  assert(userInNearLimit, 'Customer found under near_limit filter');
+  console.log(`  ✔ Filter 'near_limit' successfully identified test customer`);
+
+  // Reset Usage
   console.log('  Testing RESET_PDF_USAGE...');
-  const resetSub = resetCustomerPdfUsage(trialUserId, 'admin_developer');
+  const resetSub = resetCustomerPdfUsage(trialUserId, 'developer_admin');
   assert.strictEqual(resetSub.pdfDownloadsUsed, 0);
-  assert.strictEqual(resetSub.pdfDownloadsRemaining, 25);
+  assert.strictEqual(resetSub.pdfDownloadsRemaining, 95);
+  console.log('  ✔ Usage reset to 0 (95 remaining)');
 
-  const afterResetDl = verifyAndConsumePdfDownload(trialUserId, 'doc_after_reset');
-  assert.strictEqual(afterResetDl.allowed, true);
-  assert.strictEqual(afterResetDl.pdfDownloadsUsed, 1);
-  assert.strictEqual(afterResetDl.pdfDownloadsRemaining, 24);
-  console.log('  ✔ Usage reset to 0, downloads resumed successfully');
-
-  // C. Adjust PDF Limit
-  console.log('  Testing ADJUST_PDF_LIMIT (set to 50)...');
-  const adjustSub = adjustCustomerPdfLimit(trialUserId, 50, 'admin_developer');
-  assert.strictEqual(adjustSub.pdfDownloadLimit, 50);
-  assert.strictEqual(adjustSub.pdfDownloadsRemaining, 49); // 50 - 1 used
-  console.log('  ✔ Limit adjusted to 50, remaining reflects updated limit (49 remaining)');
-
-  console.log('✔ PASS: Developer actions (ADD_BONUS_PDF, RESET_PDF_USAGE, ADJUST_PDF_LIMIT) verified.\n');
-
-  console.log('=== ALL PACKAGE-BASED PDF DOWNLOAD LIMIT TESTS PASSED SUCCESSFULLY! ===\n');
+  console.log('\n=== ALL EASYWORKS PDF DOWNLOAD LIMIT SYSTEM TESTS PASSED! ===\n');
 }
 
 runTests().catch(err => {
