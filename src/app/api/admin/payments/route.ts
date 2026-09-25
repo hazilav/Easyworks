@@ -4,6 +4,7 @@ import {
   approveManualPayment,
   rejectManualPayment,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,45 +12,43 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || undefined;
 
     const requests = getAllManualPaymentRequests(status);
-    return NextResponse.json({ success: true, requests });
+    return apiSuccess({ requests });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[GET /api/admin/payments] Error:', error);
+    return apiError(error.message || 'Failed to fetch payments', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { requestId, action, reason, adminName } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { requestId, action, reason, adminName } = parsed.body || {};
 
     if (!requestId || !action) {
-      return NextResponse.json(
-        { success: false, error: 'Request ID and action (APPROVE or REJECT) are required' },
-        { status: 400 }
-      );
+      return apiError('Request ID and action (APPROVE or REJECT) are required', 400);
     }
 
     if (action === 'APPROVE') {
       const result = approveManualPayment(requestId, adminName || 'Admin');
-      return NextResponse.json({
-        success: true,
-        message: 'Payment approved and subscription activated successfully.',
-        subscription: result.subscription,
+      return apiSuccess({
+        message: 'Payment approved and subscription activated',
+        payment: result.payment || {},
+        subscription: result.subscription || {},
       });
     } else if (action === 'REJECT') {
       const rejectionReason = reason || 'Payment reference / UTR could not be verified.';
-      const result = rejectManualPayment(requestId, rejectionReason, adminName || 'Admin');
-      return NextResponse.json({
-        success: true,
+      rejectManualPayment(requestId, rejectionReason, adminName || 'Admin');
+      return apiSuccess({
         message: 'Payment request marked as rejected.',
       });
     } else {
-      return NextResponse.json(
-        { success: false, error: 'Invalid action. Must be APPROVE or REJECT.' },
-        { status: 400 }
-      );
+      return apiError('Invalid action. Must be APPROVE or REJECT.', 400);
     }
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/admin/payments] Error:', error);
+    return apiError(error.message || 'Payment approval failed', 500);
   }
 }

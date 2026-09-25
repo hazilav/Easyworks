@@ -8,6 +8,7 @@ import {
   getAllManualPaymentRequests,
 } from '@/lib/db/database';
 import { getPublicGatewayConfig } from '@/lib/billing/razorpay';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,8 +19,7 @@ export async function GET(req: NextRequest) {
     const paymentSettings = getPaymentSettings();
     const manualPayments = getAllManualPaymentRequests();
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       subscribers,
       customRequests,
       plans,
@@ -28,26 +28,27 @@ export async function GET(req: NextRequest) {
       manualPayments,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[GET /api/admin/billing] Error:', error);
+    return apiError(error.message || 'Failed to fetch billing data', 500);
   }
 }
 
-
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, action, planId } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, action, planId } = parsed.body || {};
 
     if (!userId || !action) {
-      return NextResponse.json(
-        { success: false, error: 'User ID and action are required' },
-        { status: 400 }
-      );
+      return apiError('User ID and action are required', 400);
     }
 
     const updatedSub = adminOverrideSubscription(userId, action, planId);
-    return NextResponse.json({ success: true, subscription: updatedSub });
+    return apiSuccess({ subscription: updatedSub });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/admin/billing] Error:', error);
+    return apiError(error.message || 'Failed to override subscription', 500);
   }
 }

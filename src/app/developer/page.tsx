@@ -11,6 +11,7 @@ import DeveloperSecurityView from '@/components/developer/DeveloperSecurityView'
 import DeveloperAuditView from '@/components/developer/DeveloperAuditView';
 import { DeveloperStats, SubscriptionPlan } from '@/types';
 import { Menu } from 'lucide-react';
+import { safeFetchJson } from '@/lib/api/client';
 
 export default function DeveloperPage() {
   const [developerUser, setDeveloperUser] = useState<any | null>(null);
@@ -28,7 +29,8 @@ export default function DeveloperPage() {
 
     if (token && savedUser) {
       try {
-        setDeveloperUser(JSON.parse(savedUser));
+        const parsed = JSON.parse(savedUser);
+        if (parsed) setDeveloperUser(parsed);
         verifySession(token);
       } catch {
         handleLogout();
@@ -40,11 +42,10 @@ export default function DeveloperPage() {
 
   const verifySession = async (token: string) => {
     try {
-      const res = await fetch('/api/developer/auth', {
+      const { data } = await safeFetchJson<{ success?: boolean; authenticated?: boolean; user?: any }>('/api/developer/auth', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (data.authenticated && data.user) {
+      if (data?.success && data?.authenticated && data?.user) {
         setDeveloperUser(data.user);
         loadStats(token);
         loadPlans(token);
@@ -62,11 +63,10 @@ export default function DeveloperPage() {
     if (!token) return;
     try {
       setLoadingStats(true);
-      const res = await fetch('/api/developer/stats', {
+      const { data } = await safeFetchJson<{ success?: boolean; stats?: any }>('/api/developer/stats', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (data.success && data.stats) {
+      if (data?.success && data?.stats) {
         setStats(data.stats);
       }
     } catch (e) {
@@ -78,11 +78,10 @@ export default function DeveloperPage() {
 
   const loadPlans = async (token = localStorage.getItem('ew_developer_token')) => {
     try {
-      const res = await fetch('/api/developer/plans', {
+      const { data } = await safeFetchJson<{ success?: boolean; plans?: any }>('/api/developer/plans', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      const data = await res.json();
-      if (data.success && data.plans) {
+      if (data?.success && data?.plans) {
         setPlans(data.plans);
       }
     } catch (e) {
@@ -106,16 +105,15 @@ export default function DeveloperPage() {
   const handleQuickApprovePayment = async (requestId: string) => {
     if (!confirm('Approve payment and activate subscription?')) return;
     try {
-      const res = await fetch('/api/admin/payments', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId, action: 'APPROVE', adminName: 'Super Admin' }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (ok && data?.success) {
         loadStats();
       } else {
-        alert(data.error || 'Failed to approve payment');
+        alert(data?.error || error || 'Failed to approve payment');
       }
     } catch (e: any) {
       alert(e.message || 'Error approving payment');
@@ -126,16 +124,15 @@ export default function DeveloperPage() {
     const reason = prompt('Reason for rejection:', 'Transaction reference could not be verified on bank records');
     if (!reason) return;
     try {
-      const res = await fetch('/api/admin/payments', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId, action: 'REJECT', reason, adminName: 'Super Admin' }),
       });
-      const data = await res.json();
-      if (data.success) {
+      if (ok && data?.success) {
         loadStats();
       } else {
-        alert(data.error || 'Failed to reject payment');
+        alert(data?.error || error || 'Failed to reject payment');
       }
     } catch (e: any) {
       alert(e.message || 'Error rejecting payment');

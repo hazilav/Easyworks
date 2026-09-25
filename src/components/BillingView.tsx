@@ -5,6 +5,7 @@ import { useApp } from '@/context/AppContext';
 import { PaymentRecord, SubscriptionPlan, ManualPaymentRequest } from '@/types';
 import PricingView from '@/components/PricingView';
 import { generatePaymentReceiptPDF } from '@/lib/receiptGenerator';
+import { safeFetchJson } from '@/lib/api/client';
 import {
   CreditCard,
   CheckCircle2,
@@ -50,16 +51,14 @@ export default function BillingView() {
     try {
       setIsLoadingHistory(true);
       // Fetch subscription payments
-      const res = await fetch(`/api/billing/subscription?userId=${currentUser.id}`);
-      const data = await res.json();
-      if (data.payments) {
+      const { data } = await safeFetchJson<{ payments?: PaymentRecord[] }>(`/api/billing/subscription?userId=${currentUser.id}`);
+      if (data?.payments) {
         setPaymentHistory(data.payments);
       }
 
       // Fetch manual payment requests
-      const mRes = await fetch(`/api/billing/manual-payment?userId=${currentUser.id}`);
-      const mData = await mRes.json();
-      if (mData.requests) {
+      const { data: mData } = await safeFetchJson<{ requests?: ManualPaymentRequest[] }>(`/api/billing/manual-payment?userId=${currentUser.id}`);
+      if (mData?.requests) {
         setManualRequests(mData.requests);
       }
     } catch (err) {

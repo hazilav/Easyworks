@@ -543,6 +543,13 @@ export function getAllPlans(includeInactive = false): SubscriptionPlan[] {
     : 'SELECT * FROM plans WHERE is_active = 1 ORDER BY is_custom ASC, duration_months ASC';
 
   const rows = db.prepare(sql).all() as any[];
+  const safeParseFeatures = (str: any) => {
+    try {
+      return str ? JSON.parse(str) : [];
+    } catch {
+      return [];
+    }
+  };
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
@@ -550,7 +557,7 @@ export function getAllPlans(includeInactive = false): SubscriptionPlan[] {
     priceINR: r.price_inr,
     pdfDownloadLimit: Number(r.pdf_download_limit ?? (r.id === 'plan_1m' ? 30 : r.id === 'plan_3m' ? 90 : r.id === 'plan_6m' ? 180 : 30)),
     description: r.description,
-    features: JSON.parse(r.features_json || '[]'),
+    features: safeParseFeatures(r.features_json),
     isActive: Boolean(r.is_active),
     isPopular: Boolean(r.is_popular),
     isCustom: Boolean(r.is_custom),
@@ -561,6 +568,13 @@ export function getPlanById(id: string): SubscriptionPlan | null {
   const db = getDatabase();
   const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(id) as any;
   if (!row) return null;
+  const safeParseFeatures = (str: any) => {
+    try {
+      return str ? JSON.parse(str) : [];
+    } catch {
+      return [];
+    }
+  };
   return {
     id: row.id,
     name: row.name,
@@ -568,7 +582,7 @@ export function getPlanById(id: string): SubscriptionPlan | null {
     priceINR: row.price_inr,
     pdfDownloadLimit: Number(row.pdf_download_limit ?? (row.id === 'plan_1m' ? 30 : row.id === 'plan_3m' ? 90 : row.id === 'plan_6m' ? 180 : 30)),
     description: row.description,
-    features: JSON.parse(row.features_json || '[]'),
+    features: safeParseFeatures(row.features_json),
     isActive: Boolean(row.is_active),
     isPopular: Boolean(row.is_popular),
     isCustom: Boolean(row.is_custom),
@@ -1588,12 +1602,17 @@ export function getAllManualPaymentRequests(filterStatus?: string): ManualPaymen
 export function approveManualPayment(
   requestId: string,
   adminName: string = 'Admin'
-): { success: boolean; subscription: Subscription } {
+): { success: boolean; subscription: Subscription; payment?: PaymentRecord } {
   const db = getDatabase();
   const req = db.prepare('SELECT * FROM manual_payment_requests WHERE id = ?').get(requestId) as any;
   if (!req) throw new Error('Payment request not found');
   if (req.status === 'APPROVED') {
-    return { success: true, subscription: getUserSubscription(req.user_id)! };
+    const existingPayment = db.prepare('SELECT * FROM payments WHERE gateway_payment_id = ?').get(req.utr_number) as any;
+    return {
+      success: true,
+      subscription: getUserSubscription(req.user_id)!,
+      payment: existingPayment || undefined,
+    };
   }
 
   const nowISO = new Date().toISOString();
@@ -1607,7 +1626,7 @@ export function approveManualPayment(
     });
 
     // 2. Record formal payment entry
-    recordPayment({
+    const payment = recordPayment({
       userId: req.user_id,
       subscriptionId: subscription.id,
       planId: req.plan_id,
@@ -1627,7 +1646,7 @@ export function approveManualPayment(
       WHERE id = ?
     `).run(adminName, nowISO, nowISO, requestId);
 
-    return { success: true, subscription };
+    return { success: true, subscription, payment };
   });
 }
 
@@ -3078,9 +3097,18 @@ export function getCustomerDocuments(userId: string): { quotations: any[]; invoi
   const qRows = db.prepare('SELECT data_json FROM quotations WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];
   const iRows = db.prepare('SELECT data_json FROM invoices WHERE user_id = ? ORDER BY created_at DESC').all(userId) as any[];
 
+  const safeParse = (str: string) => {
+    if (!str || typeof str !== 'string' || !str.trim()) return null;
+    try {
+      return JSON.parse(str);
+    } catch {
+      return null;
+    }
+  };
+
   return {
-    quotations: qRows.map((r) => JSON.parse(r.data_json)),
-    invoices: iRows.map((r) => JSON.parse(r.data_json)),
+    quotations: qRows.map((r) => safeParse(r.data_json)).filter(Boolean),
+    invoices: iRows.map((r) => safeParse(r.data_json)).filter(Boolean),
   };
 }
 

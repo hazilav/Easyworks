@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCustomerFullDetails, verifyDeveloperSessionToken } from '@/lib/db/database';
+import { apiSuccess, apiError, apiUnauthorized } from '@/lib/api/server';
 
 export async function GET(
   req: NextRequest,
@@ -10,25 +11,19 @@ export async function GET(
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
     const { id } = await params;
     const details = getCustomerFullDetails(id);
 
     if (!details) {
-      return NextResponse.json({ success: false, error: 'Customer not found.' }, { status: 404 });
+      return apiError('Customer not found.', 404, 'NOT_FOUND');
     }
 
-    return NextResponse.json({ success: true, details });
+    return apiSuccess({ details });
   } catch (error: any) {
-    console.error('Error fetching customer full details:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch customer details.' },
-      { status: 500 }
-    );
+    console.error('[GET /api/developer/customers/[id]] Error:', error);
+    return apiError(error.message || 'Failed to fetch customer details.', 500);
   }
 }

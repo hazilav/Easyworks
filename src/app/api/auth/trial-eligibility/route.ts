@@ -5,6 +5,7 @@ import {
   createOrUpdateTrialIdentity,
 } from '@/lib/db/database';
 import crypto from 'node:crypto';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,12 +13,12 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+      return apiError('userId is required', 400);
     }
 
     const identity = getTrialIdentityByUserId(userId);
     if (!identity) {
-      return NextResponse.json({
+      return apiSuccess({
         status: 'REQUIRES_VERIFICATION',
         isEligible: false,
         requiresEmailVerification: true,
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
 
     const evaluation = evaluateTrialEligibility(userId, { deviceId, ipAddress });
 
-    const response = NextResponse.json(evaluation);
+    const response = apiSuccess(evaluation);
 
     // Set persistent device ID cookie if missing
     if (!deviceId) {
@@ -47,18 +48,21 @@ export async function GET(req: NextRequest) {
 
     return response;
   } catch (error: any) {
-    console.error('Error getting trial eligibility:', error);
-    return NextResponse.json({ error: error.message || 'Failed to check trial eligibility' }, { status: 500 });
+    console.error('[GET /api/auth/trial-eligibility] Error:', error);
+    return apiError(error.message || 'Failed to check trial eligibility', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, email, phone, businessName, gstin } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, email, phone, businessName, gstin } = parsed.body || {};
 
     if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+      return apiError('userId is required', 400);
     }
 
     const ipAddress = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '127.0.0.1';
@@ -83,7 +87,7 @@ export async function POST(req: NextRequest) {
 
     const result = evaluateTrialEligibility(userId, { deviceId, ipAddress });
 
-    const response = NextResponse.json(result);
+    const response = apiSuccess(result);
     response.cookies.set('easyworks_device_id', deviceId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -93,7 +97,7 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (error: any) {
-    console.error('Error evaluating trial eligibility:', error);
-    return NextResponse.json({ error: error.message || 'Failed to evaluate trial eligibility' }, { status: 500 });
+    console.error('[POST /api/auth/trial-eligibility] Error:', error);
+    return apiError(error.message || 'Failed to evaluate trial eligibility', 500);
   }
 }

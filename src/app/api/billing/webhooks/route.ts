@@ -7,6 +7,7 @@ import {
   getUserSubscription,
 } from '@/lib/db/database';
 import { verifyWebhookSignature } from '@/lib/billing/razorpay';
+import { apiSuccess, apiError } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,17 +17,22 @@ export async function POST(req: NextRequest) {
     // 1. Signature Verification
     const isValid = verifyWebhookSignature(rawBody, signature);
     if (!isValid) {
-      return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 400 });
+      return apiError('Invalid webhook signature', 400);
     }
 
-    const event = JSON.parse(rawBody);
+    let event: any;
+    try {
+      event = rawBody && rawBody.trim() ? JSON.parse(rawBody) : {};
+    } catch (parseErr) {
+      return apiError('Malformed webhook JSON payload', 400);
+    }
+
     const eventId = event.event_id || event.id || `evt_${Date.now()}`;
     const eventType = event.event || 'unknown';
 
     // 2. Idempotency Check
     if (isWebhookEventProcessed(eventId)) {
-      return NextResponse.json({
-        success: true,
+      return apiSuccess({
         message: 'Event already processed (idempotent)',
         eventId,
       });
@@ -92,9 +98,9 @@ export async function POST(req: NextRequest) {
     // 4. Record event for idempotency
     recordWebhookEvent(eventId, eventType, event);
 
-    return NextResponse.json({ success: true, processed: true, eventId });
+    return apiSuccess({ processed: true, eventId });
   } catch (error: any) {
-    console.error('Webhook error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/webhooks] Webhook error:', error);
+    return apiError(error.message || 'Webhook processing failed', 500);
   }
 }

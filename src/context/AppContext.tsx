@@ -21,6 +21,7 @@ import {
   createBlankInvoice,
 } from '@/lib/initialData';
 import { generateQuotationNumber, generateInvoiceNumber } from '@/lib/calculator';
+import { safeFetchJson } from '@/lib/api/client';
 
 export type AppView =
   | 'dashboard'
@@ -142,7 +143,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const res = await fetch('/api/billing/pdf-download', {
+      const data = await safeFetchJson('/api/billing/pdf-download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -153,8 +154,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.allowed) {
+      if (data.success && data.allowed) {
         if (subscription) {
           setSubscription((prev) =>
             prev
@@ -205,7 +205,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     try {
       setIsLoadingBilling(true);
-      const res = await fetch('/api/billing/subscription', {
+      const data = await safeFetchJson('/api/billing/subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,8 +215,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           businessName: userToFetch.businessName,
         }),
       });
-      const data = await res.json();
-      if (data.subscription) {
+      if (data.success && data.subscription) {
         setSubscription(data.subscription);
       }
       if (data.isSuspended && currentUser) {
@@ -231,9 +230,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPlans = async () => {
     try {
-      const res = await fetch('/api/billing/plans');
-      const data = await res.json();
-      if (data.plans) setPlans(data.plans);
+      const data = await safeFetchJson('/api/billing/plans');
+      if (data.success && data.plans) setPlans(data.plans);
     } catch (e) {
       console.error('Failed to load plans:', e);
     }
@@ -244,15 +242,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Check existing session
+  const safeJsonParse = (str: string | null, fallback: any = null) => {
+    if (!str || !str.trim()) return fallback;
+    try {
+      return JSON.parse(str);
+    } catch {
+      return fallback;
+    }
+  };
+
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         const sessionUser = localStorage.getItem('ew_session_user');
         if (sessionUser) {
-          const parsed = JSON.parse(sessionUser);
-          setCurrentUser(parsed);
-          loadUserData(parsed.id, parsed.businessName);
-          refreshSubscription(parsed);
+          const parsed = safeJsonParse(sessionUser);
+          if (parsed && parsed.id) {
+            setCurrentUser(parsed);
+            loadUserData(parsed.id, parsed.businessName);
+            refreshSubscription(parsed);
+          }
         }
       }
     } catch (e) {
@@ -272,37 +281,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const savedBiz = localStorage.getItem(`ew_biz_${userId}`);
       if (savedBiz) {
-        setBusiness(JSON.parse(savedBiz));
+        const parsedBiz = safeJsonParse(savedBiz);
+        if (parsedBiz) setBusiness(parsedBiz);
       } else if (defaultBizName) {
         setBusiness({ ...DEFAULT_BUSINESS_PROFILE, businessName: defaultBizName, ownerName: currentUser?.name || 'Owner' });
       }
 
       const savedCust = localStorage.getItem(`ew_cust_${userId}`);
-      if (savedCust) setCustomers(JSON.parse(savedCust));
+      const parsedCust = safeJsonParse(savedCust);
+      if (parsedCust) setCustomers(parsedCust);
       else setCustomers(INITIAL_CUSTOMERS);
 
       const savedCat = localStorage.getItem(`ew_cat_${userId}`);
-      if (savedCat) setCatalog(JSON.parse(savedCat));
+      const parsedCat = safeJsonParse(savedCat);
+      if (parsedCat) setCatalog(parsedCat);
       else setCatalog(INITIAL_CATALOG_ITEMS);
 
       const savedQuotes = localStorage.getItem(`ew_quotes_${userId}`);
-      if (savedQuotes) setQuotations(JSON.parse(savedQuotes));
+      const parsedQuotes = safeJsonParse(savedQuotes);
+      if (parsedQuotes) setQuotations(parsedQuotes);
       else setQuotations([]);
 
       const savedInvoices = localStorage.getItem(`ew_invoices_${userId}`);
-      if (savedInvoices) setInvoices(JSON.parse(savedInvoices));
+      const parsedInvoices = safeJsonParse(savedInvoices);
+      if (parsedInvoices) setInvoices(parsedInvoices);
       else setInvoices([]);
 
       // Sync cloud documents
-      fetch(`/api/documents?userId=${userId}`)
-        .then(res => res.json())
-        .then(data => {
+      safeFetchJson(`/api/documents?userId=${userId}`)
+        .then((data) => {
           if (data.success) {
             if (data.quotations && data.quotations.length > 0) {
-              setQuotations(prev => (prev.length === 0 ? data.quotations : prev));
+              setQuotations((prev) => (prev.length === 0 ? data.quotations : prev));
             }
             if (data.invoices && data.invoices.length > 0) {
-              setInvoices(prev => (prev.length === 0 ? data.invoices : prev));
+              setInvoices((prev) => (prev.length === 0 ? data.invoices : prev));
             }
           }
         })

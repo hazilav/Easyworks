@@ -1,38 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPlanById, getUserSubscription } from '@/lib/db/database';
-import { createGatewayOrder, getPublicGatewayConfig } from '@/lib/billing/razorpay';
+import { createGatewayOrder } from '@/lib/billing/razorpay';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, planId } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, planId } = parsed.body || {};
 
     if (!userId || !planId) {
-      return NextResponse.json(
-        { success: false, error: 'User ID and Plan ID are required' },
-        { status: 400 }
-      );
+      return apiError('User ID and Plan ID are required', 400);
     }
 
     // Authoritative check on plan from database
     const plan = getPlanById(planId);
     if (!plan || !plan.isActive) {
-      return NextResponse.json(
-        { success: false, error: 'Plan is not available or inactive' },
-        { status: 400 }
-      );
+      return apiError('Plan is not available or inactive', 400);
     }
 
     if (plan.isCustom) {
-      return NextResponse.json(
-        { success: false, error: 'Custom plans require contacting sales via request form' },
-        { status: 400 }
-      );
+      return apiError('Custom plans require contacting sales via request form', 400);
     }
 
     const sub = getUserSubscription(userId);
     if (!sub) {
-      return NextResponse.json({ success: false, error: 'User subscription record not found' }, { status: 404 });
+      return apiError('User subscription record not found', 404);
     }
 
     const receipt = `rcpt_${userId.slice(0, 6)}_${Date.now()}`;
@@ -46,8 +41,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       order: {
         orderId: order.orderId,
         amountPaise: order.amountPaise,
@@ -61,6 +55,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/create-order] Error:', error);
+    return apiError(error.message || 'Failed to create payment order', 500);
   }
 }

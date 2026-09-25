@@ -18,6 +18,7 @@ import {
   Radio,
 } from 'lucide-react';
 import { TrialIdentity } from '@/types';
+import { safeFetchJson } from '@/lib/api/client';
 
 export default function DeveloperSecurityView() {
   const [trials, setTrials] = useState<any[]>([]);
@@ -28,9 +29,8 @@ export default function DeveloperSecurityView() {
   const fetchTrials = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admin/trials');
-      const data = await res.json();
-      if (data.trials) {
+      const { data } = await safeFetchJson<{ trials?: any[] }>('/api/admin/trials');
+      if (data?.trials) {
         setTrials(data.trials);
       }
     } catch (e) {
@@ -48,16 +48,18 @@ export default function DeveloperSecurityView() {
     if (!confirm('Override and mark this trial as ELIGIBLE?')) return;
     setProcessingUserId(userId);
     try {
-      const res = await fetch('/api/admin/trials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'approve', userId, notes: 'Manually verified by Super Admin' }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/admin/trials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'approve', userId, notes: 'Manually verified by Super Admin' }),
+        }
+      );
+      if (ok && data?.success) {
         fetchTrials();
       } else {
-        alert(data.error || 'Failed to approve trial');
+        alert(data?.error || error || 'Failed to approve trial');
       }
     } catch (e: any) {
       alert(e.message || 'Error updating trial');
@@ -71,16 +73,18 @@ export default function DeveloperSecurityView() {
     if (!reason) return;
     setProcessingUserId(userId);
     try {
-      const res = await fetch('/api/admin/trials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reject', userId, reason }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/admin/trials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reject', userId, reason }),
+        }
+      );
+      if (ok && data?.success) {
         fetchTrials();
       } else {
-        alert(data.error || 'Failed to reject trial');
+        alert(data?.error || error || 'Failed to reject trial');
       }
     } catch (e: any) {
       alert(e.message || 'Error rejecting trial');

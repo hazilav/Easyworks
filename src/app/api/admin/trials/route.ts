@@ -4,37 +4,41 @@ import {
   adminApproveTrial,
   adminRejectTrial,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET() {
   try {
     const trials = getAllTrialIdentities();
-    return NextResponse.json({ trials });
+    return apiSuccess({ trials });
   } catch (error: any) {
-    console.error('Error fetching admin trial identities:', error);
-    return NextResponse.json({ error: error.message || 'Failed to fetch trial identities' }, { status: 500 });
+    console.error('[GET /api/admin/trials] Error:', error);
+    return apiError(error.message || 'Failed to fetch trial identities', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { action, userId, notes, reason } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { action, userId, notes, reason } = parsed.body || {};
 
     if (!action || !userId) {
-      return NextResponse.json({ error: 'Action and userId are required.' }, { status: 400 });
+      return apiError('Action and userId are required.', 400);
     }
 
     if (action === 'approve') {
       const result = adminApproveTrial(userId, notes || 'Approved by admin');
-      return NextResponse.json(result);
+      return apiSuccess({ message: 'Trial approved successfully.', ...result });
     } else if (action === 'reject') {
       const result = adminRejectTrial(userId, reason || 'Suspicious activity or duplicate trial request');
-      return NextResponse.json(result);
+      return apiSuccess({ message: 'Trial rejected.', ...result });
     } else {
-      return NextResponse.json({ error: 'Invalid action. Supported: approve, reject' }, { status: 400 });
+      return apiError('Invalid action. Supported: approve, reject', 400);
     }
   } catch (error: any) {
-    console.error('Error in admin trial action:', error);
-    return NextResponse.json({ error: error.message || 'Failed to perform admin trial action' }, { status: 500 });
+    console.error('[POST /api/admin/trials] Error in admin trial action:', error);
+    return apiError(error.message || 'Failed to perform admin trial action', 500);
   }
 }

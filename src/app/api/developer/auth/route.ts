@@ -4,38 +4,32 @@ import {
   verifyDeveloperSessionToken,
   getDatabase,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { email, password } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { email, password } = parsed.body || {};
 
     if (!email || !password) {
-      return NextResponse.json(
-        { success: false, error: 'Email and password are required.' },
-        { status: 400 }
-      );
+      return apiError('Email and password are required.', 400);
     }
 
     const result = verifyDeveloperCredentials(email, password);
     if (!result.success) {
-      return NextResponse.json(
-        { success: false, error: result.error || 'Authentication failed.' },
-        { status: 401 }
-      );
+      return apiError(result.error || 'Authentication failed.', 401, 'INVALID_CREDENTIALS');
     }
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       user: result.user,
       token: result.token,
     });
   } catch (error: any) {
-    console.error('Developer login error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Internal server error.' },
-      { status: 500 }
-    );
+    console.error('[POST /api/developer/auth] Error:', error);
+    return apiError(error.message || 'Internal server error.', 500);
   }
 }
 
@@ -45,23 +39,18 @@ export async function GET(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { authenticated: false, error: 'Unauthorized developer session.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Authentication required', 'UNAUTHORIZED');
     }
 
     const db = getDatabase();
     const admin = db.prepare("SELECT id, email, name, role, phone FROM users WHERE role = 'SUPER_ADMIN' LIMIT 1").get() as any;
 
-    return NextResponse.json({
+    return apiSuccess({
       authenticated: true,
       user: admin,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { authenticated: false, error: error.message },
-      { status: 500 }
-    );
+    console.error('[GET /api/developer/auth] Error:', error);
+    return apiError(error.message || 'Authentication check failed', 500);
   }
 }

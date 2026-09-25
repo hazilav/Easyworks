@@ -14,6 +14,7 @@ import {
   getCustomerPdfUsageHistory,
   verifyDeveloperSessionToken,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,10 +22,7 @@ export async function GET(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
     const { searchParams } = new URL(req.url);
@@ -32,13 +30,10 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get('search') || undefined;
 
     const customers = getAllCustomersWithDetails(filter, search);
-    return NextResponse.json({ success: true, customers });
+    return apiSuccess({ customers });
   } catch (error: any) {
-    console.error('Error fetching customers:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch customers.' },
-      { status: 500 }
-    );
+    console.error('[GET /api/developer/customers] Error:', error);
+    return apiError(error.message || 'Failed to fetch customers.', 500);
   }
 }
 
@@ -48,38 +43,34 @@ export async function POST(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
-    const body = await req.json();
-    const { action, userId, planId, days, reason, durationMonths, limit, bonus, amount } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { action, userId, planId, days, reason, durationMonths, limit, bonus, amount } = parsed.body || {};
 
     if (!action || !userId) {
-      return NextResponse.json(
-        { success: false, error: 'Action and userId are required.' },
-        { status: 400 }
-      );
+      return apiError('Action and userId are required.', 400);
     }
 
     switch (action) {
       case 'SUSPEND': {
         updateCustomerStatus(userId, 'SUSPENDED', reason);
-        return NextResponse.json({ success: true, message: 'Customer account suspended.' });
+        return apiSuccess({ message: 'Customer account suspended.' });
       }
 
       case 'REACTIVATE': {
         updateCustomerStatus(userId, 'ACTIVE');
-        return NextResponse.json({ success: true, message: 'Customer account reactivated.' });
+        return apiSuccess({ message: 'Customer account reactivated.' });
       }
 
       case 'EXTEND_SUB': {
         const daysNum = parseInt(days, 10) || 30;
         const updatedSub = extendCustomerSubscription(userId, daysNum);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: `Subscription extended by ${daysNum} days.`,
           subscription: updatedSub,
         });
@@ -87,11 +78,10 @@ export async function POST(req: NextRequest) {
 
       case 'CHANGE_PLAN': {
         if (!planId) {
-          return NextResponse.json({ success: false, error: 'Plan ID required.' }, { status: 400 });
+          return apiError('Plan ID required.', 400);
         }
         const updatedSub = changeCustomerPlan(userId, planId);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: 'Subscription plan updated.',
           subscription: updatedSub,
         });
@@ -99,8 +89,7 @@ export async function POST(req: NextRequest) {
 
       case 'CANCEL_SUB': {
         const updatedSub = cancelCustomerSubscription(userId, reason);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: 'Subscription cancelled.',
           subscription: updatedSub,
         });
@@ -108,11 +97,10 @@ export async function POST(req: NextRequest) {
 
       case 'MANUAL_ACTIVATE': {
         if (!planId) {
-          return NextResponse.json({ success: false, error: 'Plan ID required.' }, { status: 400 });
+          return apiError('Plan ID required.', 400);
         }
         const updatedSub = manuallyActivateSubscription(userId, planId, durationMonths);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: 'Subscription manually activated.',
           subscription: updatedSub,
         });
@@ -120,17 +108,16 @@ export async function POST(req: NextRequest) {
 
       case 'RESET_ACCESS': {
         const result = resetCustomerAccess(userId);
-        return NextResponse.json(result);
+        return apiSuccess(result);
       }
 
       case 'ADJUST_PDF_LIMIT': {
         const limitNum = parseInt(limit, 10);
         if (isNaN(limitNum) || limitNum < 0) {
-          return NextResponse.json({ success: false, error: 'Valid PDF download limit is required.' }, { status: 400 });
+          return apiError('Valid PDF download limit is required.', 400);
         }
         const updatedSub = adjustCustomerPdfLimit(userId, limitNum);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: `PDF download limit updated to ${limitNum}.`,
           subscription: updatedSub,
         });
@@ -139,11 +126,10 @@ export async function POST(req: NextRequest) {
       case 'ADD_BONUS_PDF': {
         const bonusNum = parseInt(bonus || amount, 10);
         if (isNaN(bonusNum) || bonusNum <= 0) {
-          return NextResponse.json({ success: false, error: 'Valid bonus amount is required.' }, { status: 400 });
+          return apiError('Valid bonus amount is required.', 400);
         }
         const updatedSub = addBonusPdfDownloads(userId, bonusNum);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: `Added +${bonusNum} bonus PDF downloads.`,
           subscription: updatedSub,
         });
@@ -152,11 +138,10 @@ export async function POST(req: NextRequest) {
       case 'REMOVE_PDF_CREDITS': {
         const amountNum = parseInt(amount || bonus, 10);
         if (isNaN(amountNum) || amountNum <= 0) {
-          return NextResponse.json({ success: false, error: 'Valid amount to remove is required.' }, { status: 400 });
+          return apiError('Valid amount to remove is required.', 400);
         }
         const updatedSub = removeCustomerPdfCredits(userId, amountNum);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: `Removed ${amountNum} PDF credits.`,
           subscription: updatedSub,
         });
@@ -164,8 +149,7 @@ export async function POST(req: NextRequest) {
 
       case 'RESET_PDF_USAGE': {
         const updatedSub = resetCustomerPdfUsage(userId);
-        return NextResponse.json({
-          success: true,
+        return apiSuccess({
           message: 'PDF downloads usage counter reset to 0.',
           subscription: updatedSub,
         });
@@ -173,23 +157,14 @@ export async function POST(req: NextRequest) {
 
       case 'GET_PDF_USAGE_HISTORY': {
         const history = getCustomerPdfUsageHistory(userId);
-        return NextResponse.json({
-          success: true,
-          history,
-        });
+        return apiSuccess({ history });
       }
 
       default:
-        return NextResponse.json(
-          { success: false, error: `Unsupported action: ${action}` },
-          { status: 400 }
-        );
+        return apiError(`Unsupported action: ${action}`, 400);
     }
   } catch (error: any) {
-    console.error('Error in customer action:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Operation failed.' },
-      { status: 500 }
-    );
+    console.error('[POST /api/developer/customers] Error in customer action:', error);
+    return apiError(error.message || 'Operation failed.', 500);
   }
 }

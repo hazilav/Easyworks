@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureUserAndTrial, getUserSubscription, getUserPayments, getTrialIdentityByUserId } from '@/lib/db/database';
+import {
+  ensureUserAndTrial,
+  getUserSubscription,
+  getUserPayments,
+  getTrialIdentityByUserId,
+} from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -7,52 +13,51 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!userId) {
-      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
+      return apiError('User ID is required', 400);
     }
 
     const subscription = getUserSubscription(userId);
-    if (!subscription) {
-      return NextResponse.json({ success: false, error: 'Subscription not found' }, { status: 404 });
-    }
+    const payments = getUserPayments(userId) || [];
+    const trialIdentity = getTrialIdentityByUserId(userId) || null;
 
-    const payments = getUserPayments(userId);
-    const trialIdentity = getTrialIdentityByUserId(userId);
-
-    return NextResponse.json({
-      success: true,
-      subscription,
+    // Requirement 12: Return safe data even when customer has no active subscription
+    return apiSuccess({
+      subscription: subscription || null,
       payments,
       trialIdentity,
-      isSuspended: subscription.status === 'SUSPENDED',
+      isSuspended: subscription ? subscription.status === 'SUSPENDED' : false,
+      hasActiveSubscription: Boolean(subscription && subscription.status === 'ACTIVE'),
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[GET /api/billing/subscription] Error:', error);
+    return apiError(error.message || 'Unable to load subscription data', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, email, name, businessName } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, email, name, businessName } = parsed.body || {};
 
     if (!userId || !email) {
-      return NextResponse.json(
-        { success: false, error: 'User ID and email are required' },
-        { status: 400 }
-      );
+      return apiError('User ID and email are required', 400);
     }
 
     const { user, subscription } = ensureUserAndTrial(userId, email, name || 'User', businessName);
-    const payments = getUserPayments(userId);
+    const payments = getUserPayments(userId) || [];
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       user,
-      subscription,
+      subscription: subscription || null,
       payments,
-      isSuspended: subscription.status === 'SUSPENDED' || user?.status === 'SUSPENDED',
+      isSuspended: subscription?.status === 'SUSPENDED' || user?.status === 'SUSPENDED',
+      hasActiveSubscription: Boolean(subscription && subscription.status === 'ACTIVE'),
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/subscription] Error:', error);
+    return apiError(error.message || 'Failed to sync subscription data', 500);
   }
 }

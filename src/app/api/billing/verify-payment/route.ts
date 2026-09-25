@@ -6,10 +6,14 @@ import {
   recordPayment,
 } from '@/lib/db/database';
 import { verifyPaymentSignature } from '@/lib/billing/razorpay';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
     const {
       userId,
       planId,
@@ -17,23 +21,20 @@ export async function POST(req: NextRequest) {
       paymentId,
       signature,
       paymentMethod,
-    } = body;
+    } = parsed.body || {};
 
     if (!userId || !planId || !orderId || !paymentId || !signature) {
-      return NextResponse.json(
-        { success: false, error: 'Missing payment verification credentials' },
-        { status: 400 }
-      );
+      return apiError('Missing payment verification credentials', 400);
     }
 
     const plan = getPlanById(planId);
     if (!plan) {
-      return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 });
+      return apiError('Plan not found', 404);
     }
 
     const sub = getUserSubscription(userId);
     if (!sub) {
-      return NextResponse.json({ success: false, error: 'Subscription not found' }, { status: 404 });
+      return apiError('Subscription not found', 404);
     }
 
     // 1. Authoritative Server-Side Signature Verification
@@ -57,10 +58,7 @@ export async function POST(req: NextRequest) {
         paymentMethod: paymentMethod || 'Online Gateway',
       });
 
-      return NextResponse.json(
-        { success: false, error: 'Payment signature verification failed' },
-        { status: 400 }
-      );
+      return apiError('Payment signature verification failed', 400);
     }
 
     // 2. Activate Paid Subscription in Database (with calendar-accurate dates)
@@ -83,12 +81,13 @@ export async function POST(req: NextRequest) {
       paymentMethod: paymentMethod || 'UPI / Cards / Netbanking',
     });
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
+      message: 'Payment verified and subscription activated successfully',
       subscription: updatedSub,
       payment,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/verify-payment] Error:', error);
+    return apiError(error.message || 'Payment verification failed', 500);
   }
 }

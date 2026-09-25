@@ -6,6 +6,7 @@ import {
   verifyDeveloperSessionToken,
   getDatabase,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,18 +16,21 @@ export async function GET(req: NextRequest) {
     // Attach subscriber count to each plan
     const plansWithCount = plans.map((p) => {
       const row = db.prepare("SELECT COUNT(*) as count FROM subscriptions WHERE plan_id = ? AND status = 'ACTIVE'").get(p.id) as any;
+      const pdfLimit = p.pdfDownloadLimit ?? (p.id === 'plan_1m' ? 30 : p.id === 'plan_3m' ? 90 : p.id === 'plan_6m' ? 180 : 30);
       return {
         ...p,
+        pdfLimit,
+        pdfDownloadLimit: pdfLimit,
+        price: p.priceINR,
+        active: p.isActive,
         activeSubscribers: row ? row.count : 0,
       };
     });
 
-    return NextResponse.json({ success: true, plans: plansWithCount });
+    return apiSuccess({ plans: plansWithCount });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch plans.' },
-      { status: 500 }
-    );
+    console.error('[GET /api/developer/plans] Error:', error);
+    return apiError(error.message || 'Failed to fetch plans.', 500);
   }
 }
 
@@ -36,32 +40,29 @@ export async function POST(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
-    const body = await req.json();
-    const { action, planId, planData } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { action, planId, planData } = parsed.body || {};
 
     if (action === 'CREATE') {
       const newPlan = createPlan(planData);
-      return NextResponse.json({ success: true, plan: newPlan });
+      return apiSuccess({ plan: newPlan });
     } else if (action === 'UPDATE') {
       if (!planId) {
-        return NextResponse.json({ success: false, error: 'Plan ID required.' }, { status: 400 });
+        return apiError('Plan ID required.', 400);
       }
       const updated = updatePlan(planId, planData);
-      return NextResponse.json({ success: true, plan: updated });
+      return apiSuccess({ plan: updated });
     } else {
-      return NextResponse.json({ success: false, error: 'Invalid action.' }, { status: 400 });
+      return apiError('Invalid action.', 400);
     }
   } catch (error: any) {
-    console.error('Error in plan operation:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update plan.' },
-      { status: 500 }
-    );
+    console.error('[POST /api/developer/plans] Error in plan operation:', error);
+    return apiError(error.message || 'Failed to update plan.', 500);
   }
 }

@@ -1,21 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPaymentSettings, updatePaymentSettings } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET() {
   try {
     const settings = getPaymentSettings();
-    return NextResponse.json({ success: true, settings });
+    return apiSuccess({ settings });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[GET /api/billing/payment-settings] Error:', error);
+    return apiError(error.message || 'Failed to fetch payment settings', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const updated = updatePaymentSettings(body);
-    return NextResponse.json({ success: true, settings: updated });
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const updated = updatePaymentSettings(parsed.body || {});
+    return apiSuccess({ settings: updated });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/payment-settings] Error:', error);
+    return apiError(error.message || 'Failed to update payment settings', 500);
   }
 }

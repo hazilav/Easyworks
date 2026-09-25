@@ -19,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
+import { safeFetchJson } from '@/lib/api/client';
 
 type SignupStep = 'details' | 'verify_email' | 'phone_entry' | 'verify_phone' | 'eligibility_result';
 
@@ -115,15 +116,14 @@ export default function AuthModal() {
     setTempUserId(uId);
 
     try {
-      const res = await fetch('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target: cleanEmail, channel: 'EMAIL', userId: uId }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to send email verification code.');
+      if (!ok) {
+        throw new Error(data?.error || error || 'Failed to send email verification code.');
       }
 
       setSignupStep('verify_email');
@@ -149,7 +149,7 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/verify-code', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -160,9 +160,8 @@ export default function AuthModal() {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Invalid verification code.');
+      if (!ok) {
+        throw new Error(data?.error || error || 'Invalid verification code.');
       }
 
       setSignupStep('phone_entry');
@@ -188,15 +187,14 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target: cleanPhone, channel: 'SMS', userId: tempUserId }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to send SMS code.');
+      if (!ok) {
+        throw new Error(data?.error || error || 'Failed to send SMS code.');
       }
 
       setSignupStep('verify_phone');
@@ -222,7 +220,7 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/verify-code', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; eligibility?: any }>('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -233,13 +231,12 @@ export default function AuthModal() {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Invalid SMS code.');
+      if (!ok) {
+        throw new Error(data?.error || error || 'Invalid SMS code.');
       }
 
       // Check eligibility result
-      if (data.eligibility) {
+      if (data?.eligibility) {
         setEligibilityResult(data.eligibility);
         setSignupStep('eligibility_result');
 
@@ -251,12 +248,11 @@ export default function AuthModal() {
         }
       } else {
         // Fallback check
-        const checkRes = await fetch(`/api/auth/trial-eligibility?userId=${tempUserId}`);
-        const checkData = await checkRes.json();
-        setEligibilityResult(checkData);
+        const { data: checkData } = await safeFetchJson<any>(`/api/auth/trial-eligibility?userId=${tempUserId}`);
+        setEligibilityResult(checkData || null);
         setSignupStep('eligibility_result');
 
-        if (checkData.status === 'ELIGIBLE') {
+        if (checkData?.status === 'ELIGIBLE') {
           setTimeout(() => {
             login(email.trim(), name.trim(), businessName.trim());
           }, 1500);
@@ -276,13 +272,12 @@ export default function AuthModal() {
     setLoading(true);
     try {
       const target = channel === 'EMAIL' ? email.trim() : phone.trim();
-      const res = await fetch('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target, channel, userId: tempUserId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!ok) throw new Error(data?.error || error || 'Failed to resend code');
       startResendCountdown();
     } catch (err: any) {
       setError(err.message);

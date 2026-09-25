@@ -1,33 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveCustomerDocument, getCustomerDocuments } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, type, document } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, type, document } = parsed.body || {};
 
     if (!userId || !type || !document) {
-      return NextResponse.json(
-        { success: false, error: 'userId, type, and document are required.' },
-        { status: 400 }
-      );
+      return apiError('userId, type, and document are required.', 400);
     }
 
     if (type !== 'quotation' && type !== 'invoice') {
-      return NextResponse.json(
-        { success: false, error: 'Type must be quotation or invoice.' },
-        { status: 400 }
-      );
+      return apiError('Type must be quotation or invoice.', 400);
     }
 
     saveCustomerDocument(userId, type, document);
-    return NextResponse.json({ success: true });
+    return apiSuccess({ message: 'Document saved successfully.' });
   } catch (error: any) {
-    console.error('Error saving document:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to save document.' },
-      { status: 500 }
-    );
+    console.error('[POST /api/documents] Error saving document:', error);
+    return apiError(error.message || 'Failed to save document.', 500);
   }
 }
 
@@ -37,18 +32,16 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'userId is required.' },
-        { status: 400 }
-      );
+      return apiSuccess({ quotations: [], invoices: [] });
     }
 
     const docs = getCustomerDocuments(userId);
-    return NextResponse.json({ success: true, ...docs });
+    return apiSuccess({
+      quotations: docs.quotations || [],
+      invoices: docs.invoices || [],
+    });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch documents.' },
-      { status: 500 }
-    );
+    console.error('[GET /api/documents] Error:', error);
+    return apiError(error.message || 'Failed to fetch documents.', 500);
   }
 }

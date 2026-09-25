@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { ManualPaymentRequest, PaymentSettings } from '@/types';
+import { safeFetchJson } from '@/lib/api/client';
 
 interface DeveloperPaymentsViewProps {
   onRefreshStats: () => void;
@@ -56,9 +57,8 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
   const fetchPayments = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admin/payments');
-      const data = await res.json();
-      if (data.success) {
+      const { data } = await safeFetchJson<{ success?: boolean; requests?: ManualPaymentRequest[] }>('/api/admin/payments');
+      if (data?.success) {
         setPayments(data.requests || []);
       }
     } catch (e) {
@@ -70,9 +70,8 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('/api/billing/payment-settings');
-      const data = await res.json();
-      if (data.success && data.settings) {
+      const { data } = await safeFetchJson<{ success?: boolean; settings?: PaymentSettings }>('/api/billing/payment-settings');
+      if (data?.success && data?.settings) {
         setSettings(data.settings);
       }
     } catch (e) {
@@ -89,17 +88,19 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
     if (!confirm('Approve payment and activate customer subscription immediately?')) return;
     setProcessingId(requestId);
     try {
-      const res = await fetch('/api/admin/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, action: 'APPROVE', adminName: 'Super Admin' }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/admin/payments',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId, action: 'APPROVE', adminName: 'Super Admin' }),
+        }
+      );
+      if (ok && data?.success) {
         fetchPayments();
         onRefreshStats();
       } else {
-        alert(data.error || 'Failed to approve payment');
+        alert(data?.error || error || 'Failed to approve payment');
       }
     } catch (e: any) {
       alert(e.message || 'Error approving payment');
@@ -113,25 +114,27 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
     if (!selectedRequestId) return;
     setProcessingId(selectedRequestId);
     try {
-      const res = await fetch('/api/admin/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requestId: selectedRequestId,
-          action: 'REJECT',
-          reason: rejectionReason || 'UTR transaction could not be verified on bank statement.',
-          adminName: 'Super Admin',
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/admin/payments',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: selectedRequestId,
+            action: 'REJECT',
+            reason: rejectionReason || 'UTR transaction could not be verified on bank statement.',
+            adminName: 'Super Admin',
+          }),
+        }
+      );
+      if (ok && data?.success) {
         setRejectModalOpen(false);
         setSelectedRequestId(null);
         setRejectionReason('');
         fetchPayments();
         onRefreshStats();
       } else {
-        alert(data.error || 'Failed to reject payment');
+        alert(data?.error || error || 'Failed to reject payment');
       }
     } catch (e: any) {
       alert(e.message || 'Error rejecting payment');
@@ -145,23 +148,25 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
     setSavingSettings(true);
     try {
       const token = localStorage.getItem('ew_developer_token') || '';
-      const res = await fetch('/api/developer/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          type: 'PAYMENT_SETTINGS',
-          paymentSettings: settings,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/developer/settings',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: 'PAYMENT_SETTINGS',
+            paymentSettings: settings,
+          }),
+        }
+      );
+      if (ok && data?.success) {
         setSettingsSaved(true);
         setTimeout(() => setSettingsSaved(false), 2500);
       } else {
-        alert(data.error || 'Failed to save payment coordinates');
+        alert(data?.error || error || 'Failed to save payment coordinates');
       }
     } catch (e: any) {
       alert(e.message || 'Error updating settings');

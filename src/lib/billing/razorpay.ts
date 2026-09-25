@@ -74,7 +74,13 @@ export async function createGatewayOrder({
         throw new Error(`Razorpay Order creation failed (${response.status}): ${errText}`);
       }
 
-      const data = await response.json();
+      const rawText = await response.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        throw new Error(`Razorpay returned non-JSON response: ${rawText.slice(0, 100)}`);
+      }
       return {
         orderId: data.id,
         amountPaise: data.amount,

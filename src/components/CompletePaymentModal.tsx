@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   FileText,
 } from 'lucide-react';
+import { safeFetchJson } from '@/lib/api/client';
 
 interface CompletePaymentModalProps {
   plan: SubscriptionPlan;
@@ -79,9 +80,8 @@ export default function CompletePaymentModal({
   const fetchPaymentSettings = async () => {
     try {
       setIsLoadingSettings(true);
-      const res = await fetch('/api/billing/payment-settings');
-      const data = await res.json();
-      if (data.success && data.settings) {
+      const { data } = await safeFetchJson<{ success?: boolean; settings?: PaymentSettings }>('/api/billing/payment-settings');
+      if (data?.success && data?.settings) {
         setPaymentSettings(data.settings);
       }
     } catch (err) {
@@ -153,7 +153,7 @@ Please activate my account.`;
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      const res = await fetch('/api/billing/manual-payment', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/billing/manual-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -165,9 +165,8 @@ Please activate my account.`;
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to submit payment confirmation');
+      if (!ok || !data?.success) {
+        throw new Error(data?.error || error || 'Failed to submit payment confirmation');
       }
 
       await refreshSubscription();

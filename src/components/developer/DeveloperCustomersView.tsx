@@ -26,6 +26,7 @@ import {
   Unlock,
   KeyRound,
 } from 'lucide-react';
+import { safeFetchJson } from '@/lib/api/client';
 import { DeveloperCustomerSummary, SubscriptionPlan } from '@/types';
 
 interface DeveloperCustomersViewProps {
@@ -67,12 +68,14 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
       if (filter !== 'all') params.set('filter', filter);
       if (search.trim()) params.set('search', search.trim());
 
-      const res = await fetch(`/api/developer/customers?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const { data } = await safeFetchJson<{ success?: boolean; customers?: DeveloperCustomerSummary[] }>(
+        `/api/developer/customers?${params.toString()}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
-      const data = await res.json();
-      if (data.success) {
+      if (data?.success) {
         setCustomers(data.customers || []);
       }
     } catch (e) {
@@ -96,11 +99,13 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
     setLoadingDetails(true);
     try {
       const token = localStorage.getItem('ew_developer_token') || '';
-      const res = await fetch(`/api/developer/customers/${customerId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (data.success) {
+      const { data } = await safeFetchJson<{ success?: boolean; details?: any }>(
+        `/api/developer/customers/${customerId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (data?.success) {
         setCustomerDetails(data.details);
       }
     } catch (e) {
@@ -146,18 +151,20 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
         body.amount = removePdfAmount;
       }
 
-      const res = await fetch('/api/developer/customers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; message?: string; error?: string }>(
+        '/api/developer/customers',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        }
+      );
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Action failed');
+      if (!ok || !data?.success) {
+        throw new Error(data?.error || error || 'Action failed');
       }
 
       setStatusMessage({ type: 'success', text: data.message || 'Operation executed successfully.' });
@@ -181,16 +188,18 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
     if (!confirm(`Are you sure you want to reset PDF downloads used count to 0 for ${customer.name}?`)) return;
     try {
       const token = localStorage.getItem('ew_developer_token') || '';
-      const res = await fetch('/api/developer/customers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ action: 'RESET_PDF_USAGE', userId: customer.id }),
-      });
-      const data = await res.json();
-      alert(data.message || 'PDF downloads usage counter reset to 0.');
+      const { data, error } = await safeFetchJson<{ success?: boolean; message?: string; error?: string }>(
+        '/api/developer/customers',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: 'RESET_PDF_USAGE', userId: customer.id }),
+        }
+      );
+      alert(data?.message || error || 'PDF downloads usage counter reset to 0.');
       fetchCustomers();
       if (selectedCustomerId === customer.id) {
         openCustomerDetails(customer.id);
@@ -204,16 +213,18 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
     if (!confirm(`Are you sure you want to reset verification limits and access for ${customer.name}?`)) return;
     try {
       const token = localStorage.getItem('ew_developer_token') || '';
-      const res = await fetch('/api/developer/customers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ action: 'RESET_ACCESS', userId: customer.id }),
-      });
-      const data = await res.json();
-      alert(data.message || 'Access reset successfully.');
+      const { data, error } = await safeFetchJson<{ success?: boolean; message?: string; error?: string }>(
+        '/api/developer/customers',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: 'RESET_ACCESS', userId: customer.id }),
+        }
+      );
+      alert(data?.message || error || 'Access reset successfully.');
       fetchCustomers();
     } catch (e: any) {
       alert(e.message || 'Failed to reset access.');
@@ -225,20 +236,22 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
       if (!confirm(`Reactivate account for ${customer.name} (${customer.email})?`)) return;
       try {
         const token = localStorage.getItem('ew_developer_token') || '';
-        const res = await fetch('/api/developer/customers', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ action: 'REACTIVATE', userId: customer.id }),
-        });
-        const data = await res.json();
-        if (data.success) {
+        const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+          '/api/developer/customers',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ action: 'REACTIVATE', userId: customer.id }),
+          }
+        );
+        if (ok && data?.success) {
           fetchCustomers();
           onRefreshStats();
         } else {
-          alert(data.error || 'Failed to reactivate customer');
+          alert(data?.error || error || 'Failed to reactivate customer');
         }
       } catch (e: any) {
         alert(e.message || 'Error reactivating customer');

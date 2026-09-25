@@ -6,6 +6,7 @@ import {
   verifyDeveloperSessionToken,
   getDatabase,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -13,26 +14,20 @@ export async function GET(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
     const settings = getPaymentSettings();
     const db = getDatabase();
     const admin = db.prepare("SELECT email, name, role, phone, created_at FROM users WHERE role = 'SUPER_ADMIN' LIMIT 1").get();
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       paymentSettings: settings,
       developer: admin,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to fetch settings.' },
-      { status: 500 }
-    );
+    console.error('[GET /api/developer/settings] Error:', error);
+    return apiError(error.message || 'Failed to fetch settings.', 500);
   }
 }
 
@@ -42,42 +37,34 @@ export async function POST(req: NextRequest) {
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
 
     if (!token || !verifyDeveloperSessionToken(token)) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized. Developer session required.' },
-        { status: 401 }
-      );
+      return apiUnauthorized('Unauthorized. Developer session required.', 'UNAUTHORIZED');
     }
 
-    const body = await req.json();
-    const { type, paymentSettings, newPassword } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { type, paymentSettings, newPassword } = parsed.body || {};
 
     if (type === 'PAYMENT_SETTINGS') {
       const updated = updatePaymentSettings(paymentSettings);
-      return NextResponse.json({
-        success: true,
+      return apiSuccess({
         message: 'Payment settings updated successfully.',
         settings: updated,
       });
     } else if (type === 'CHANGE_PASSWORD') {
       if (!newPassword || newPassword.length < 8) {
-        return NextResponse.json(
-          { success: false, error: 'New password must be at least 8 characters long.' },
-          { status: 400 }
-        );
+        return apiError('New password must be at least 8 characters long.', 400);
       }
       updateDeveloperPassword(newPassword);
-      return NextResponse.json({
-        success: true,
+      return apiSuccess({
         message: 'Developer password changed successfully.',
       });
     } else {
-      return NextResponse.json({ success: false, error: 'Invalid setting type.' }, { status: 400 });
+      return apiError('Invalid setting type.', 400);
     }
   } catch (error: any) {
-    console.error('Error updating settings:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update settings.' },
-      { status: 500 }
-    );
+    console.error('[POST /api/developer/settings] Error updating settings:', error);
+    return apiError(error.message || 'Failed to update settings.', 500);
   }
 }

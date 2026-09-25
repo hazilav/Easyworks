@@ -1,16 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAndConsumeTrialPdfDownload } from '@/lib/db/database';
+import { verifyAndConsumeTrialPdfDownload, getUserSubscription } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+
+    if (!userId) {
+      return apiError('User ID is required for verification.', 400);
+    }
+
+    const sub = getUserSubscription(userId);
+    const pdfLimit = sub?.pdfDownloadLimit ?? 2;
+    const pdfUsed = sub?.pdfDownloadsUsed ?? sub?.trialPdfDownloads ?? 0;
+    const pdfRemaining = Math.max(0, pdfLimit - pdfUsed);
+
+    return apiSuccess({
+      allowed: pdfRemaining > 0 && sub?.status !== 'SUSPENDED',
+      pdfLimit,
+      pdfUsed,
+      pdfRemaining,
+      pdfDownloadLimit: pdfLimit,
+      pdfDownloadsUsed: pdfUsed,
+      pdfDownloadsRemaining: pdfRemaining,
+      isSubscribed: sub?.status === 'ACTIVE',
+      status: sub?.status || 'TRIALING',
+    });
+  } catch (err: any) {
+    console.error('[GET /api/billing/pdf-download] Error:', err);
+    return apiError(err.message || 'Failed to check PDF limit', 500);
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, documentType, documentId, documentNumber } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, documentType, documentId, documentNumber } = parsed.body || {};
 
     if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required for verification.' },
-        { status: 400 }
-      );
+      return apiError('User ID is required for verification.', 400);
     }
 
     const ipAddress =
@@ -30,9 +62,15 @@ export async function POST(req: NextRequest) {
     if (!result.allowed) {
       return NextResponse.json(
         {
+          success: false,
           allowed: false,
           reason: result.reason,
           message:
+            result.message ||
+            (result.isSubscribed
+              ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
+              : "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs."),
+          error:
             result.message ||
             (result.isSubscribed
               ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
@@ -47,11 +85,11 @@ export async function POST(req: NextRequest) {
           maxTrialDownloads: result.maxTrialDownloads,
           isSubscribed: result.isSubscribed,
         },
-        { status: 403 }
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    return NextResponse.json({
+    return apiSuccess({
       allowed: true,
       pdfLimit: result.pdfDownloadLimit,
       pdfUsed: result.pdfDownloadsUsed,
@@ -64,10 +102,7 @@ export async function POST(req: NextRequest) {
       isSubscribed: result.isSubscribed,
     });
   } catch (err: any) {
-    console.error('PDF download verification error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Internal server error during verification' },
-      { status: 500 }
-    );
+    console.error('[POST /api/billing/pdf-download] Error:', err);
+    return apiError(err.message || 'Internal server error during verification', 500);
   }
 }

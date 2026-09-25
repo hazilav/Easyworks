@@ -8,6 +8,7 @@ import {
   PaymentSettings,
   ManualPaymentRequest,
 } from '@/types';
+import { safeFetchJson } from '@/lib/api/client';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -98,23 +99,20 @@ export default function AdminBillingView() {
     try {
       setIsLoading(true);
       // Fetch plans
-      const plansRes = await fetch('/api/billing/plans?includeInactive=true');
-      const plansData = await plansRes.json();
-      if (plansData.plans) setPlans(plansData.plans);
+      const { data: plansData } = await safeFetchJson<{ plans?: SubscriptionPlan[] }>('/api/billing/plans?includeInactive=true');
+      if (plansData?.plans) setPlans(plansData.plans);
 
       // Fetch admin data
-      const adminRes = await fetch('/api/admin/billing');
-      const adminData = await adminRes.json();
-      if (adminData.subscribers) setSubscribers(adminData.subscribers);
-      if (adminData.payments) setPayments(adminData.payments);
-      if (adminData.customRequests) setRequests(adminData.customRequests);
-      if (adminData.paymentSettings) setPaymentSettings(adminData.paymentSettings);
-      if (adminData.manualPayments) setManualPayments(adminData.manualPayments);
+      const { data: adminData } = await safeFetchJson<any>('/api/admin/billing');
+      if (adminData?.subscribers) setSubscribers(adminData.subscribers);
+      if (adminData?.payments) setPayments(adminData.payments);
+      if (adminData?.customRequests) setRequests(adminData.customRequests);
+      if (adminData?.paymentSettings) setPaymentSettings(adminData.paymentSettings);
+      if (adminData?.manualPayments) setManualPayments(adminData.manualPayments);
 
       // Fetch trial identities and abuse risk records
-      const trialsRes = await fetch('/api/admin/trials');
-      const trialsData = await trialsRes.json();
-      if (trialsData.trials) setTrialIdentities(trialsData.trials);
+      const { data: trialsData } = await safeFetchJson<{ trials?: any[] }>('/api/admin/trials');
+      if (trialsData?.trials) setTrialIdentities(trialsData.trials);
     } catch (err) {
       console.error('Failed to load admin billing data:', err);
     } finally {
@@ -128,7 +126,7 @@ export default function AdminBillingView() {
     }
     try {
       setIsProcessingTrialId(trial.user_id);
-      const res = await fetch('/api/admin/trials', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/trials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -137,12 +135,11 @@ export default function AdminBillingView() {
           notes: `Manually approved by ${currentUser?.name || 'Admin'}`,
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (ok && data?.success) {
         showMessage(`Trial approved! 7-day free trial activated for ${trial.user_name || trial.email}.`);
         fetchData();
       } else {
-        alert(data.error || 'Failed to approve trial');
+        alert(data?.error || error || 'Failed to approve trial');
       }
     } catch (err: any) {
       alert(err.message || 'Error approving trial');
@@ -156,7 +153,7 @@ export default function AdminBillingView() {
     if (!trialRejectModalUser) return;
     try {
       setIsProcessingTrialId(trialRejectModalUser.user_id);
-      const res = await fetch('/api/admin/trials', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/trials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -165,14 +162,13 @@ export default function AdminBillingView() {
           reason: trialRejectReason.trim() || 'Suspected trial abuse or duplicate phone/business.',
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (ok && data?.success) {
         showMessage(`Trial rejected for ${trialRejectModalUser.user_name || trialRejectModalUser.email}.`);
         setTrialRejectModalUser(null);
         setTrialRejectReason('');
         fetchData();
       } else {
-        alert(data.error || 'Failed to reject trial');
+        alert(data?.error || error || 'Failed to reject trial');
       }
     } catch (err: any) {
       alert(err.message || 'Error rejecting trial');
@@ -187,7 +183,7 @@ export default function AdminBillingView() {
     }
     try {
       setIsProcessingPaymentId(req.id);
-      const res = await fetch('/api/admin/payments', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -196,12 +192,11 @@ export default function AdminBillingView() {
           adminName: currentUser?.name || 'Admin',
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (ok && data?.success) {
         showMessage(`Payment approved! ${req.planName} subscription activated for ${req.userName || 'user'}.`);
         fetchData();
       } else {
-        alert(data.error || 'Failed to approve payment');
+        alert(data?.error || error || 'Failed to approve payment');
       }
     } catch (err: any) {
       alert(err.message || 'Error approving payment');
@@ -215,7 +210,7 @@ export default function AdminBillingView() {
     if (!rejectModalReq) return;
     try {
       setIsProcessingPaymentId(rejectModalReq.id);
-      const res = await fetch('/api/admin/payments', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/admin/payments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -225,14 +220,13 @@ export default function AdminBillingView() {
           adminName: currentUser?.name || 'Admin',
         }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (ok && data?.success) {
         showMessage('Payment request rejected.');
         setRejectModalReq(null);
         setRejectionReason('');
         fetchData();
       } else {
-        alert(data.error || 'Failed to reject payment');
+        alert(data?.error || error || 'Failed to reject payment');
       }
     } catch (err: any) {
       alert(err.message || 'Error rejecting payment');
@@ -245,17 +239,19 @@ export default function AdminBillingView() {
     e.preventDefault();
     try {
       setIsSavingSettings(true);
-      const res = await fetch('/api/billing/payment-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(paymentSettings),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; settings?: PaymentSettings; error?: string }>(
+        '/api/billing/payment-settings',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(paymentSettings),
+        }
+      );
+      if (ok && data?.success && data.settings) {
         setPaymentSettings(data.settings);
         showMessage('Business payment details saved successfully!');
       } else {
-        alert(data.error || 'Failed to update payment settings');
+        alert(data?.error || error || 'Failed to update payment settings');
       }
     } catch (err: any) {
       alert(err.message || 'Error saving payment settings');
@@ -269,18 +265,17 @@ export default function AdminBillingView() {
     if (!editingPlan) return;
     try {
       setIsSavingPlan(true);
-      const res = await fetch('/api/billing/plans', {
+      const { ok, data, error } = await safeFetchJson<{ plan?: SubscriptionPlan; error?: string }>('/api/billing/plans', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editingPlan),
       });
-      const data = await res.json();
-      if (res.ok && data.plan) {
-        setPlans((prev) => prev.map((p) => (p.id === data.plan.id ? data.plan : p)));
+      if (ok && data?.plan) {
+        setPlans((prev) => prev.map((p) => (p.id === data.plan!.id ? data.plan! : p)));
         setEditingPlan(null);
         showMessage('Plan updated successfully!');
       } else {
-        alert(data.error || 'Failed to update plan');
+        alert(data?.error || error || 'Failed to update plan');
       }
     } catch (err: any) {
       alert(err.message || 'Error saving plan');
@@ -291,7 +286,7 @@ export default function AdminBillingView() {
 
   const handleManualOverride = async (userId: string, action: 'grant' | 'revoke' | 'extend_trial', days: number = 30) => {
     try {
-      const res = await fetch('/api/admin/billing', {
+      const { ok, data, error } = await safeFetchJson<{ error?: string }>('/api/admin/billing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -301,12 +296,11 @@ export default function AdminBillingView() {
           days,
         }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (ok) {
         showMessage(`Access updated for user (${action.toUpperCase()})`);
         fetchData();
       } else {
-        alert(data.error || 'Failed to update user access');
+        alert(data?.error || error || 'Failed to update user access');
       }
     } catch (err: any) {
       alert(err.message || 'Network error');

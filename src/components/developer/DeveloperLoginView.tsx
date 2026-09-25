@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, Mail, ArrowRight, AlertCircle, Phone, Sparkles } from 'lucide-react';
+import { safeFetchJson } from '@/lib/api/client';
 
 interface DeveloperLoginViewProps {
   onLoginSuccess: (user: any, token: string) => void;
@@ -24,15 +25,17 @@ export default function DeveloperLoginView({ onLoginSuccess }: DeveloperLoginVie
     setError(null);
 
     try {
-      const res = await fetch('/api/developer/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; token?: string; user?: any; error?: string }>(
+        '/api/developer/auth',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        }
+      );
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Authentication failed. Please verify your credentials.');
+      if (!ok || !data?.success || !data.token) {
+        throw new Error(data?.error || error || 'Authentication failed. Please verify your credentials.');
       }
 
       // Store developer session

@@ -18,6 +18,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import CompletePaymentModal from './CompletePaymentModal';
+import { safeFetchJson } from '@/lib/api/client';
 
 
 interface PricingViewProps {
@@ -142,9 +143,8 @@ export default function PricingView({ embedded = false, onPlanSelected }: Pricin
       if (!contextPlans || contextPlans.length === 0) {
         setIsLoading(true);
       }
-      const res = await fetch('/api/billing/plans');
-      const data = await res.json();
-      if (data.plans && data.plans.length > 0) {
+      const { data } = await safeFetchJson<{ plans?: SubscriptionPlan[] }>('/api/billing/plans');
+      if (data?.plans && data.plans.length > 0) {
         setPlans(data.plans);
       }
     } catch (err) {

@@ -7,17 +7,18 @@ import {
   getTrialIdentityByUserId,
 } from '@/lib/db/database';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { target, code, channel, userId } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { target, code, channel, userId } = parsed.body || {};
 
     if (!target || !code || !channel || !userId) {
-      return NextResponse.json(
-        { error: 'Target, verification code, channel, and userId are required.' },
-        { status: 400 }
-      );
+      return apiError('Target, verification code, channel, and userId are required.', 400);
     }
 
     const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
@@ -25,19 +26,18 @@ export async function POST(req: NextRequest) {
     // 1. Sliding window rate limit: Max 6 verification attempts per target per 10 minutes
     const rateCheck = checkRateLimit(`otp_verify_${normalizedTarget}`, 6, 600);
     if (!rateCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: `Too many failed attempts. Please wait ${rateCheck.resetInSeconds} seconds before trying again.`,
-          resetInSeconds: rateCheck.resetInSeconds,
-        },
-        { status: 429 }
+      return apiError(
+        `Too many failed attempts. Please wait ${rateCheck.resetInSeconds} seconds before trying again.`,
+        429,
+        'RATE_LIMITED',
+        { resetInSeconds: rateCheck.resetInSeconds }
       );
     }
 
     // 2. Verify code
     const result = verifyVerificationCode(normalizedTarget, code);
     if (!result.success) {
-      return NextResponse.json({ error: result.error || 'Invalid verification code.' }, { status: 400 });
+      return apiError(result.error || 'Invalid verification code.', 400);
     }
 
     // 3. Mark identity as verified
@@ -66,14 +66,13 @@ export async function POST(req: NextRequest) {
       eligibilityResult = evaluateTrialEligibility(userId, { deviceId, ipAddress });
     }
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       message: `${channel === 'EMAIL' ? 'Email' : 'Phone'} verified successfully.`,
       identity: current,
       eligibility: eligibilityResult,
     });
   } catch (error: any) {
-    console.error('Error verifying code:', error);
-    return NextResponse.json({ error: error.message || 'Verification failed.' }, { status: 500 });
+    console.error('[POST /api/auth/verify-code] Error verifying code:', error);
+    return apiError(error.message || 'Verification failed.', 500);
   }
 }

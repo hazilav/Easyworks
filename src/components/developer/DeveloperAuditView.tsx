@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, RefreshCw, ShieldCheck, User, Clock, Terminal } from 'lucide-react';
 import { ActivityLog } from '@/types';
+import { safeFetchJson } from '@/lib/api/client';
 
 export default function DeveloperAuditView() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -12,11 +13,13 @@ export default function DeveloperAuditView() {
     try {
       setLoading(true);
       const token = localStorage.getItem('ew_developer_token') || '';
-      const res = await fetch('/api/developer/stats', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (data.success && data.stats) {
+      const { data } = await safeFetchJson<{ success?: boolean; stats?: { recentActivity?: ActivityLog[] } }>(
+        '/api/developer/stats',
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (data?.success && data?.stats) {
         setLogs(data.stats.recentActivity || []);
       }
     } catch (e) {

@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { SubscriptionPlan } from '@/types';
+import { safeFetchJson } from '@/lib/api/client';
 
 interface DeveloperPlansViewProps {
   plans: (SubscriptionPlan & { activeSubscribers?: number })[];
@@ -91,18 +92,20 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
         },
       };
 
-      const res = await fetch('/api/developer/plans', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>(
+        '/api/developer/plans',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        }
+      );
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to save plan');
+      if (!ok || !data?.success) {
+        throw new Error(data?.error || error || 'Failed to save plan');
       }
 
       setStatusMsg('Plan updated and live in database.');
@@ -121,7 +124,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
   const handleToggleActive = async (plan: SubscriptionPlan) => {
     try {
       const token = localStorage.getItem('ew_developer_token') || '';
-      await fetch('/api/developer/plans', {
+      await safeFetchJson('/api/developer/plans', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

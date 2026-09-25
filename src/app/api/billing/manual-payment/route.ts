@@ -4,6 +4,7 @@ import {
   getUserManualPayments,
   getUserSubscription,
 } from '@/lib/db/database';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,45 +12,36 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId');
 
     if (!userId) {
-      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
+      return apiError('User ID is required', 400);
     }
 
-    const requests = getUserManualPayments(userId);
-    const subscription = getUserSubscription(userId);
+    const requests = getUserManualPayments(userId) || [];
+    const subscription = getUserSubscription(userId) || null;
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       requests,
       subscription,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[GET /api/billing/manual-payment] Error:', error);
+    return apiError(error.message || 'Failed to fetch manual payments', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, planId, utrNumber, screenshotUrl, notes } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { userId, planId, utrNumber, screenshotUrl, notes } = parsed.body || {};
 
     if (!userId || !planId || !utrNumber) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'User ID, Plan ID, and Transaction ID / UTR number are required.',
-        },
-        { status: 400 }
-      );
+      return apiError('User ID, Plan ID, and Transaction ID / UTR number are required.', 400);
     }
 
     if (utrNumber.trim().length < 4) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Please enter a valid Transaction ID / UTR number (at least 4 characters).',
-        },
-        { status: 400 }
-      );
+      return apiError('Please enter a valid Transaction ID / UTR number (at least 4 characters).', 400);
     }
 
     const paymentRequest = createManualPaymentRequest({
@@ -62,13 +54,13 @@ export async function POST(req: NextRequest) {
 
     const updatedSubscription = getUserSubscription(userId);
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       message: 'Payment confirmation submitted successfully. Awaiting admin verification.',
       paymentRequest,
       subscription: updatedSubscription,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    console.error('[POST /api/billing/manual-payment] Error:', error);
+    return apiError(error.message || 'Failed to submit payment request', 500);
   }
 }

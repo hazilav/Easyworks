@@ -6,29 +6,28 @@ import {
 } from '@/lib/db/database';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
+import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { target, channel, userId } = body;
+    const parsed = await safeReadBody(req);
+    if (!parsed.success) {
+      return parsed.response;
+    }
+    const { target, channel, userId } = parsed.body || {};
 
     if (!target || !channel || !['EMAIL', 'SMS'].includes(channel)) {
-      return NextResponse.json(
-        { error: 'Valid target (email or phone) and channel (EMAIL or SMS) are required.' },
-        { status: 400 }
-      );
+      return apiError('Valid target (email or phone) and channel (EMAIL or SMS) are required.', 400);
     }
 
     // 1. Check disposable email domain
     if (channel === 'EMAIL') {
       if (isDisposableEmail(target)) {
-        return NextResponse.json(
-          {
-            error:
-              'Disposable / temporary email addresses are not permitted. Please use a valid work or personal email.',
-            isDisposable: true,
-          },
-          { status: 400 }
+        return apiError(
+          'Disposable / temporary email addresses are not permitted. Please use a valid work or personal email.',
+          400,
+          'DISPOSABLE_EMAIL',
+          { isDisposable: true }
         );
       }
     }
@@ -38,12 +37,11 @@ export async function POST(req: NextRequest) {
     // 2. Sliding window rate limit: Max 3 OTP requests per target per 10 minutes (600s)
     const rateCheck = checkRateLimit(`otp_req_${normalizedTarget}`, 3, 600);
     if (!rateCheck.allowed) {
-      return NextResponse.json(
-        {
-          error: `Too many verification requests. Please wait ${rateCheck.resetInSeconds} seconds before requesting a new code.`,
-          resetInSeconds: rateCheck.resetInSeconds,
-        },
-        { status: 429 }
+      return apiError(
+        `Too many verification requests. Please wait ${rateCheck.resetInSeconds} seconds before requesting a new code.`,
+        429,
+        'RATE_LIMITED',
+        { resetInSeconds: rateCheck.resetInSeconds }
       );
     }
 
@@ -59,15 +57,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      success: true,
+    return apiSuccess({
       message: `Verification code sent to ${normalizedTarget}.`,
       expiresAt,
       // Debug code provided for rapid automated testing and demo environments
       debugCode: code,
     });
   } catch (error: any) {
-    console.error('Error sending verification code:', error);
-    return NextResponse.json({ error: error.message || 'Failed to send verification code.' }, { status: 500 });
+    console.error('[POST /api/auth/send-verification] Error:', error);
+    return apiError(error.message || 'Failed to send verification code.', 500);
   }
 }
