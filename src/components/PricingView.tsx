@@ -298,11 +298,6 @@ export default function PricingView({ embedded = false, onPlanSelected }: Pricin
                             / {plan.durationMonths === 1 ? 'mo' : `${plan.durationMonths} mos`}
                           </span>
                         </div>
-                        {plan.durationMonths > 1 && (
-                          <p className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
-                            Approx. ₹{Math.round(plan.priceINR / plan.durationMonths)} / month
-                          </p>
-                        )}
                       </div>
                     )}
                   </div>
