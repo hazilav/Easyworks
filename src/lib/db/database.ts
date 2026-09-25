@@ -620,6 +620,44 @@ export function updatePlan(
 // Users & Subscriptions API Helpers
 // ------------------------------------------------------------------
 
+export function ensureUserExists(
+  userId: string,
+  email?: string,
+  name?: string,
+  businessName?: string
+): any {
+  const db = getDatabase();
+  const nowISO = new Date().toISOString();
+  let user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+  if (user) return user;
+
+  const cleanEmail = (email || `${userId}@easyworks.local`).trim().toLowerCase();
+  const existingByEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail) as any;
+  if (existingByEmail) {
+    return existingByEmail;
+  }
+
+  const isFirstUser = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c === 0;
+  const role = isFirstUser ? 'admin' : 'user';
+
+  try {
+    db.prepare(`
+      INSERT INTO users (id, email, name, business_name, role, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      cleanEmail,
+      name || cleanEmail.split('@')[0],
+      businessName || `${name || cleanEmail.split('@')[0]}'s Business`,
+      role,
+      nowISO
+    );
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  } catch {
+    return db.prepare('SELECT * FROM users WHERE id = ? OR email = ?').get(userId, cleanEmail);
+  }
+}
+
 export function ensureUserAndTrial(
   userId: string,
   email: string,
@@ -631,23 +669,37 @@ export function ensureUserAndTrial(
   const nowISO = now.toISOString();
 
   // 1. Ensure user
+  const cleanEmail = email.trim().toLowerCase();
   let user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
   if (!user) {
-    const isFirstUser = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c === 0;
-    const role = isFirstUser ? 'admin' : 'user';
+    const existingByEmail = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail) as any;
+    if (existingByEmail) {
+      user = existingByEmail;
+      userId = user.id;
+    } else {
+      const isFirstUser = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c === 0;
+      const role = isFirstUser ? 'admin' : 'user';
 
-    db.prepare(`
-      INSERT INTO users (id, email, name, business_name, role, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(userId, email.toLowerCase(), name, businessName || `${name}'s Business`, role, nowISO);
+      try {
+        db.prepare(`
+          INSERT INTO users (id, email, name, business_name, role, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(userId, cleanEmail, name, businessName || `${name}'s Business`, role, nowISO);
+        user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+      } catch {
+        user = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
+        if (user) userId = user.id;
+      }
 
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-
-    // Business record
-    db.prepare(`
-      INSERT INTO businesses (id, user_id, business_name, owner_name, currency, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run('biz_' + userId, userId, businessName || `${name}'s Business`, name, 'INR', nowISO);
+      // Business record
+      const existingBiz = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId);
+      if (!existingBiz) {
+        db.prepare(`
+          INSERT INTO businesses (id, user_id, business_name, owner_name, currency, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run('biz_' + userId, userId, businessName || `${name}'s Business`, name, 'INR', nowISO);
+      }
+    }
   }
 
   // 2. Ensure subscription (7-day trial for new accounts)
@@ -835,8 +887,15 @@ export function verifyAndConsumeTrialPdfDownload(
   options?: string | VerifyPdfDownloadOptions
 ): VerifyPdfDownloadResult {
   const db = getDatabase();
-  const userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
-  const subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+  ensureUserExists(userId);
+  let userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
+  let subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+
+  if (!subRow) {
+    ensureUserAndTrial(userId, `${userId}@easyworks.local`, 'Customer');
+    subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+    userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
+  }
 
   const opts: VerifyPdfDownloadOptions =
     typeof options === 'string' ? { docId: options } : options || {};
@@ -1490,6 +1549,12 @@ export function createManualPaymentRequest({
   const plan = getPlanById(planId);
   if (!plan) throw new Error('Plan not found: ' + planId);
 
+  ensureUserExists(userId);
+  const sub = db.prepare('SELECT id FROM subscriptions WHERE user_id = ?').get(userId);
+  if (!sub) {
+    ensureUserAndTrial(userId, `${userId}@easyworks.local`, 'Customer');
+  }
+
   const id = 'mpr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   const nowISO = new Date().toISOString();
 
@@ -1739,6 +1804,9 @@ export function createOrUpdateTrialIdentity(data: {
 }): TrialIdentity {
   const db = getDatabase();
   const nowISO = new Date().toISOString();
+
+  // Ensure the user account exists so foreign key constraints on user_id succeed
+  ensureUserExists(data.userId, data.email, data.name, data.businessName);
 
   const normalizedEmail = normalizeEmail(data.email);
   const normalizedPhone = data.phone ? normalizePhone(data.phone) : undefined;
@@ -3044,6 +3112,7 @@ export function saveCustomerDocument(
   doc: any
 ): boolean {
   const db = getDatabase();
+  ensureUserExists(userId, undefined, doc?.ownerName, doc?.businessName);
   const nowISO = new Date().toISOString();
   const customerName = doc.customer?.name || doc.customerName || 'Direct Client';
   const grandTotal = doc.totals?.grandTotal || 0;

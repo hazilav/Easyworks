@@ -10,12 +10,15 @@ import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
+  let userId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
       return parsed.response;
     }
-    const { target, code, channel, userId } = parsed.body || {};
+    const body = parsed.body || {};
+    userId = body.userId;
+    const { target, code, channel } = body;
 
     if (!target || !code || !channel || !userId) {
       return apiError('Target, verification code, channel, and userId are required.', 400);
@@ -72,7 +75,10 @@ export async function POST(req: NextRequest) {
       eligibility: eligibilityResult,
     });
   } catch (error: any) {
-    console.error('[POST /api/auth/verify-code] Error verifying code:', error);
-    return apiError(error.message || 'Verification failed.', 500);
+    return apiError(error, 500, 'INTERNAL_SERVER_ERROR', {
+      apiRoute: '/api/auth/verify-code',
+      method: 'POST',
+      userId,
+    });
   }
 }

@@ -9,12 +9,15 @@ import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
+  let userId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
       return parsed.response;
     }
-    const { target, channel, userId } = parsed.body || {};
+    const body = parsed.body || {};
+    userId = body.userId;
+    const { target, channel } = body;
 
     if (!target || !channel || !['EMAIL', 'SMS'].includes(channel)) {
       return apiError('Valid target (email or phone) and channel (EMAIL or SMS) are required.', 400);
@@ -64,7 +67,10 @@ export async function POST(req: NextRequest) {
       debugCode: code,
     });
   } catch (error: any) {
-    console.error('[POST /api/auth/send-verification] Error:', error);
-    return apiError(error.message || 'Failed to send verification code.', 500);
+    return apiError(error, 500, 'INTERNAL_SERVER_ERROR', {
+      apiRoute: '/api/auth/send-verification',
+      method: 'POST',
+      userId,
+    });
   }
 }
