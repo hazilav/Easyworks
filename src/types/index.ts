@@ -232,6 +232,7 @@ export interface SubscriptionPlan {
   name: string;
   durationMonths: number;
   priceINR: number;
+  pdfDownloadLimit: number;
   description: string;
   features: string[];
   isActive: boolean;
@@ -254,6 +255,9 @@ export interface Subscription {
   plan?: SubscriptionPlan;
   trialDaysRemaining?: number;
   hasAccess?: boolean;
+  pdfDownloadLimit: number;
+  pdfDownloadsUsed: number;
+  pdfDownloadsRemaining: number;
   trialPdfDownloads?: number;
   maxTrialPdfDownloads?: number;
 }
@@ -415,6 +419,9 @@ export interface DeveloperCustomerSummary {
     trialEndsAt: string;
     subscriptionStartedAt: string | null;
     subscriptionEndsAt: string | null;
+    pdfDownloadLimit: number;
+    pdfDownloadsUsed: number;
+    pdfDownloadsRemaining: number;
     trialPdfDownloads: number;
   };
   quotationsCount: number;

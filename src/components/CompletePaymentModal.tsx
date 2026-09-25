@@ -227,7 +227,7 @@ Branch: ${paymentSettings.bankBranch}`;
           <div className="text-right">
             <div className="text-2xl font-black text-indigo-700">₹{plan.priceINR}</div>
             <div className="text-xs font-medium text-emerald-600 flex items-center gap-1">
-              <Check className="w-3.5 h-3.5" /> Unlimited PDF Downloads
+              <Check className="w-3.5 h-3.5" /> {plan.pdfDownloadLimit ? `${plan.pdfDownloadLimit} PDF Downloads Included` : 'PDF Downloads Included'}
             </div>
           </div>
         </div>

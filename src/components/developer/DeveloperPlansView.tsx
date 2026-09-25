@@ -40,9 +40,10 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
       id: '',
       name: '',
       durationMonths: 1,
-      priceINR: 299,
+      priceINR: 249,
+      pdfDownloadLimit: 20,
       description: '',
-      features: ['Unlimited Quotations & Invoices', 'All Curated Design Templates', 'Instant Client-Ready PDF Downloads'],
+      features: ['20 Total PDF Downloads', 'Unlimited Quotations & Invoices', 'All Curated Design Templates'],
       isActive: true,
       isPopular: false,
       isCustom: false,
@@ -81,6 +82,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
           name: editingPlan.name,
           durationMonths: editingPlan.durationMonths,
           priceINR: editingPlan.priceINR,
+          pdfDownloadLimit: editingPlan.pdfDownloadLimit ?? 20,
           description: editingPlan.description,
           features: editingPlan.features,
           isActive: editingPlan.isActive,
@@ -225,10 +227,15 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
                       <span className="text-xs text-zinc-400">/ {plan.durationMonths}m</span>
                     )}
                   </div>
-                  <div className="text-[11px] text-zinc-400 mt-1 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-blue-400" />
-                    <span>
-                      <strong className="text-white">{plan.activeSubscribers ?? 0}</strong> active subscribers
+                  <div className="text-[11px] text-zinc-400 mt-1 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-400" />
+                      <span>
+                        <strong className="text-white">{plan.activeSubscribers ?? 0}</strong> subscribers
+                      </span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono font-bold">
+                      {plan.pdfDownloadLimit} PDFs
                     </span>
                   </div>
                 </div>
@@ -323,7 +330,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1.5">
                     Price in INR (₹) *
@@ -341,8 +348,24 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
                 </div>
 
                 <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                    PDF Download Limit *
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    required
+                    value={editingPlan.pdfDownloadLimit ?? 20}
+                    onChange={(e) =>
+                      setEditingPlan({ ...editingPlan, pdfDownloadLimit: parseInt(e.target.value, 10) || 0 })
+                    }
+                    className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-medium text-zinc-300 mb-1.5">Badge / Style</label>
-                  <div className="flex items-center gap-4 h-10">
+                  <div className="flex items-center gap-3 h-10">
                     <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">
                       <input
                         type="checkbox"
@@ -350,7 +373,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
                         onChange={(e) => setEditingPlan({ ...editingPlan, isPopular: e.target.checked })}
                         className="rounded accent-blue-600"
                       />
-                      <span>Popular Badge</span>
+                      <span>Popular</span>
                     </label>
 
                     <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer">

@@ -150,9 +150,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       const data = await res.json();
       if (res.ok && data.allowed) {
-        if (subscription && !data.isSubscribed) {
+        if (subscription) {
           setSubscription((prev) =>
-            prev ? { ...prev, trialPdfDownloads: data.trialPdfDownloads } : prev
+            prev
+              ? {
+                  ...prev,
+                  pdfDownloadLimit: data.pdfDownloadLimit ?? prev.pdfDownloadLimit,
+                  pdfDownloadsUsed: data.pdfDownloadsUsed ?? ((prev.pdfDownloadsUsed || 0) + 1),
+                  pdfDownloadsRemaining:
+                    data.pdfDownloadsRemaining ??
+                    Math.max(0, (prev.pdfDownloadLimit || 0) - ((prev.pdfDownloadsUsed || 0) + 1)),
+                  trialPdfDownloads: data.trialPdfDownloads ?? data.pdfDownloadsUsed ?? prev.trialPdfDownloads,
+                }
+              : prev
           );
         }
         return true;
@@ -160,6 +170,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (data.message && data.message.includes('suspended')) {
           refreshSubscription();
           return false;
+        }
+        if (subscription && data.pdfDownloadLimit !== undefined) {
+          setSubscription((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  pdfDownloadLimit: data.pdfDownloadLimit,
+                  pdfDownloadsUsed: data.pdfDownloadsUsed,
+                  pdfDownloadsRemaining: data.pdfDownloadsRemaining,
+                  trialPdfDownloads: data.trialPdfDownloads,
+                }
+              : prev
+          );
         }
         setDownloadLimitModalOpen(true);
         return false;

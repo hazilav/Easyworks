@@ -46,13 +46,15 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
 
   // Lifecycle Action Modals
   const [activeActionModal, setActiveActionModal] = useState<{
-    type: 'EXTEND' | 'CHANGE_PLAN' | 'SUSPEND' | 'MANUAL_ACTIVATE' | 'CANCEL';
+    type: 'EXTEND' | 'CHANGE_PLAN' | 'SUSPEND' | 'MANUAL_ACTIVATE' | 'CANCEL' | 'ADJUST_PDF' | 'ADD_BONUS_PDF';
     customer: DeveloperCustomerSummary;
   } | null>(null);
 
   const [extendDays, setExtendDays] = useState(30);
   const [selectedPlanId, setSelectedPlanId] = useState('plan_1m');
   const [suspendReason, setSuspendReason] = useState('');
+  const [customPdfLimit, setCustomPdfLimit] = useState(20);
+  const [bonusPdfAmount, setBonusPdfAmount] = useState(10);
   const [actionLoading, setActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -132,6 +134,12 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
       } else if (type === 'CANCEL') {
         body.action = 'CANCEL_SUB';
         body.reason = suspendReason;
+      } else if (type === 'ADJUST_PDF') {
+        body.action = 'ADJUST_PDF_LIMIT';
+        body.limit = customPdfLimit;
+      } else if (type === 'ADD_BONUS_PDF') {
+        body.action = 'ADD_BONUS_PDF';
+        body.bonus = bonusPdfAmount;
       }
 
       const res = await fetch('/api/developer/customers', {
@@ -162,6 +170,29 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
       setStatusMessage({ type: 'error', text: err.message || 'Action failed.' });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleResetPdfUsage = async (customer: DeveloperCustomerSummary) => {
+    if (!confirm(`Are you sure you want to reset PDF downloads used count to 0 for ${customer.name}?`)) return;
+    try {
+      const token = localStorage.getItem('ew_developer_token') || '';
+      const res = await fetch('/api/developer/customers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: 'RESET_PDF_USAGE', userId: customer.id }),
+      });
+      const data = await res.json();
+      alert(data.message || 'PDF downloads usage counter reset to 0.');
+      fetchCustomers();
+      if (selectedCustomerId === customer.id) {
+        openCustomerDetails(customer.id);
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to reset PDF usage.');
     }
   };
 
@@ -293,7 +324,7 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                   <th className="py-3.5 px-4 min-w-[210px] whitespace-nowrap">Customer</th>
                   <th className="py-3.5 px-4 min-w-[150px] whitespace-nowrap">Business</th>
                   <th className="py-3.5 px-4 min-w-[180px] whitespace-nowrap">Subscription</th>
-                  <th className="py-3.5 px-4 min-w-[110px] whitespace-nowrap">Trial PDFs</th>
+                  <th className="py-3.5 px-4 min-w-[140px] whitespace-nowrap">PDF Quota</th>
                   <th className="py-3.5 px-4 min-w-[130px] whitespace-nowrap">Documents</th>
                   <th className="py-3.5 px-4 min-w-[110px] whitespace-nowrap">Status</th>
                   <th className="py-3.5 px-4 min-w-[230px] whitespace-nowrap text-right">Actions</th>
@@ -382,14 +413,21 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-white font-mono">
-                              {cust.subscription?.trialPdfDownloads ?? 0}
+                              {cust.subscription?.pdfDownloadsUsed ?? cust.subscription?.trialPdfDownloads ?? 0}
                             </span>
-                            <span className="text-zinc-500 font-mono">/ 2</span>
-                            {(cust.subscription?.trialPdfDownloads ?? 0) >= 2 && (
-                              <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-400 font-bold">
-                                LIMIT REACHED
+                            <span className="text-zinc-500 font-mono">
+                              / {cust.subscription?.pdfDownloadLimit ?? 2}
+                            </span>
+                            {(cust.subscription?.pdfDownloadsRemaining !== undefined
+                              ? cust.subscription.pdfDownloadsRemaining <= 0
+                              : (cust.subscription?.trialPdfDownloads ?? 0) >= (cust.subscription?.pdfDownloadLimit ?? 2)) && (
+                              <span className="text-[9px] px-1 py-0.2 rounded bg-rose-500/20 text-rose-400 font-bold">
+                                LIMIT
                               </span>
                             )}
+                          </div>
+                          <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                            {cust.subscription?.pdfDownloadsRemaining ?? 0} remaining
                           </div>
                         </td>
 
@@ -577,10 +615,13 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                       <strong className="text-white text-xs">{customerDetails.subscription?.status}</strong>
                     </div>
                     <div className="p-2.5 rounded-lg bg-[#0e131f] border border-zinc-800">
-                      <span className="text-zinc-500 text-[10px] block">Trial PDFs Downloaded</span>
+                      <span className="text-zinc-500 text-[10px] block">PDF Limit & Usage</span>
                       <strong className="text-white text-xs">
-                        {customerDetails.subscription?.trialPdfDownloads ?? 0} / 2
+                        {customerDetails.subscription?.pdfDownloadsUsed ?? 0} of {customerDetails.subscription?.pdfDownloadLimit ?? 2} used
                       </strong>
+                      <span className="text-[10px] text-zinc-400 block mt-0.5 font-mono">
+                        {customerDetails.subscription?.pdfDownloadsRemaining ?? 0} remaining
+                      </span>
                     </div>
                     <div className="p-2.5 rounded-lg bg-[#0e131f] border border-zinc-800">
                       <span className="text-zinc-500 text-[10px] block">Trial Ends At</span>
@@ -634,6 +675,46 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                       className="py-1.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-semibold cursor-pointer"
                     >
                       Reset Access
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        setCustomPdfLimit(customerDetails.subscription?.pdfDownloadLimit ?? 20);
+                        setActiveActionModal({
+                          type: 'ADJUST_PDF',
+                          customer: {
+                            ...customerDetails.user,
+                            subscription: customerDetails.subscription,
+                          },
+                        });
+                      }}
+                      className="flex-1 py-1.5 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      Adjust PDF Limit
+                    </button>
+                    <button
+                      onClick={() => {
+                        setBonusPdfAmount(10);
+                        setActiveActionModal({
+                          type: 'ADD_BONUS_PDF',
+                          customer: {
+                            ...customerDetails.user,
+                            subscription: customerDetails.subscription,
+                          },
+                        });
+                      }}
+                      className="flex-1 py-1.5 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      +Bonus PDFs
+                    </button>
+                    <button
+                      onClick={() => handleResetPdfUsage(customerDetails.user)}
+                      className="py-1.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-amber-400 rounded-lg text-xs font-semibold cursor-pointer"
+                      title="Reset PDF downloads used count to 0"
+                    >
+                      Reset PDF Usage
                     </button>
                   </div>
                 </div>
@@ -707,6 +788,8 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                   (activeActionModal.customer.status === 'SUSPENDED' ? 'Reactivate Account' : 'Suspend Account')}
                 {activeActionModal.type === 'MANUAL_ACTIVATE' && 'Direct Subscription Activation'}
                 {activeActionModal.type === 'CANCEL' && 'Cancel Subscription'}
+                {activeActionModal.type === 'ADJUST_PDF' && 'Adjust Customer PDF Download Limit'}
+                {activeActionModal.type === 'ADD_BONUS_PDF' && 'Add Bonus PDF Downloads'}
               </h3>
               <button
                 onClick={() => setActiveActionModal(null)}
@@ -767,7 +850,7 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                 >
                   {plans.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} — ₹{p.priceINR} ({p.durationMonths}m)
+                      {p.name} — ₹{p.priceINR} ({p.durationMonths}m, {p.pdfDownloadLimit} PDFs)
                     </option>
                   ))}
                 </select>
@@ -784,6 +867,62 @@ export default function DeveloperCustomersView({ plans, onRefreshStats }: Develo
                   placeholder="e.g. Terms violation, requested pause, duplicate trial"
                   className="w-full h-10 px-3 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500"
                 />
+              </div>
+            )}
+
+            {activeActionModal.type === 'ADJUST_PDF' && (
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-zinc-300">
+                  New Total PDF Download Limit
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={customPdfLimit}
+                  onChange={(e) => setCustomPdfLimit(parseInt(e.target.value, 10) || 0)}
+                  placeholder="e.g. 50"
+                  className="w-full h-10 px-3 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
+                />
+                <p className="text-[11px] text-zinc-400">
+                  Current usage: {activeActionModal.customer.subscription?.pdfDownloadsUsed ?? 0} of {activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2} used ({activeActionModal.customer.subscription?.pdfDownloadsRemaining ?? 0} remaining).
+                </p>
+              </div>
+            )}
+
+            {activeActionModal.type === 'ADD_BONUS_PDF' && (
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-zinc-300">
+                  Bonus PDF Downloads to Add
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[5, 10, 20, 50].map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setBonusPdfAmount(b)}
+                      className={`py-2 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                        bonusPdfAmount === b
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-[#0e131f] border border-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      +{b} PDFs
+                    </button>
+                  ))}
+                </div>
+                <div className="pt-2">
+                  <label className="block text-[11px] text-zinc-400 mb-1">Or enter custom bonus count:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={bonusPdfAmount}
+                    onChange={(e) => setBonusPdfAmount(parseInt(e.target.value, 10) || 1)}
+                    className="w-full h-9 px-3 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Will increase limit from {activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2} to {(activeActionModal.customer.subscription?.pdfDownloadLimit ?? 2) + bonusPdfAmount}.
+                </p>
               </div>
             )}
 

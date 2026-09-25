@@ -29,6 +29,7 @@ export default function DashboardView() {
     setCurrentView,
     business,
     requestPdfDownload,
+    subscription,
   } = useApp();
 
   const totalQuotations = quotations.length;
@@ -39,6 +40,10 @@ export default function DashboardView() {
 
   const totalQuotedAmount = quotations.reduce((acc, q) => acc + (q.totals?.grandTotal || 0), 0);
   const totalInvoicedAmount = invoices.reduce((acc, i) => acc + (i.totals?.grandTotal || 0), 0);
+
+  const pdfLimit = subscription?.pdfDownloadLimit ?? 2;
+  const pdfUsed = subscription?.pdfDownloadsUsed ?? subscription?.trialPdfDownloads ?? 0;
+  const pdfRemaining = subscription?.pdfDownloadsRemaining ?? Math.max(0, pdfLimit - pdfUsed);
 
   const handleDownloadQuote = async (quote: Quotation) => {
     const allowed = await requestPdfDownload('quotation', quote.id);
@@ -83,6 +88,84 @@ export default function DashboardView() {
             >
               <Receipt className="w-4 h-4" />
               <span>Create Invoice</span>
+            </button>
+          </div>
+        </div>
+
+        {/* PDF Quota Status Card */}
+        <div className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+          pdfRemaining <= 0
+            ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-900/60'
+            : pdfRemaining <= 5
+            ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-900/60'
+            : 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800'
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+              pdfRemaining <= 0
+                ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400'
+                : pdfRemaining <= 5
+                ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400'
+                : 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+            }`}>
+              <Download className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  PDF Download Quota:
+                </span>
+                <span className={`text-xs font-mono font-bold ${
+                  pdfRemaining <= 0 ? 'text-rose-600 dark:text-rose-400' : pdfRemaining <= 5 ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'
+                }`}>
+                  {pdfRemaining} remaining of {pdfLimit}
+                </span>
+                {pdfRemaining <= 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300">
+                    LIMIT REACHED
+                  </span>
+                )}
+                {pdfRemaining > 0 && pdfRemaining <= 5 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                    LOW QUOTA
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                {pdfRemaining <= 0
+                  ? 'All PDF downloads included in your plan have been used. Upgrade or renew to export more PDFs.'
+                  : `${pdfUsed} PDFs downloaded so far. Quotation and invoice drafting is always unlimited.`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="hidden md:flex flex-col items-end gap-1 min-w-[100px]">
+              <span className="text-[10px] text-slate-400 font-mono">
+                {Math.round((pdfUsed / Math.max(1, pdfLimit)) * 100)}% Used
+              </span>
+              <div className="w-24 h-1.5 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    pdfRemaining <= 0 ? 'bg-rose-500' : pdfRemaining <= 5 ? 'bg-amber-500' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${Math.min(100, Math.round((pdfUsed / Math.max(1, pdfLimit)) * 100))}%` }}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={() => setCurrentView('billing')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                pdfRemaining <= 0
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
+                  : pdfRemaining <= 5
+                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+              }`}
+            >
+              <span>{pdfRemaining <= 0 ? 'Upgrade Plan' : 'Manage Quota'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

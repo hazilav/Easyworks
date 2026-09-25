@@ -87,7 +87,7 @@ export default function TrialCountdownBanner() {
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
           <span>
-            <strong>Free Trial Expired.</strong> You can view and edit existing documents. Subscribe to unlock unlimited PDF downloads.
+            <strong>Free Trial Expired.</strong> You can view and edit existing documents. Subscribe to unlock full PDF downloads.
           </span>
         </div>
         <button

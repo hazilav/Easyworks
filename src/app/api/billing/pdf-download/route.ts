@@ -22,10 +22,13 @@ export async function POST(req: NextRequest) {
           reason: result.reason,
           message:
             result.message ||
-            "You've used your 2 free PDF downloads. Upgrade to Easyworks to unlock unlimited PDF downloads.",
+            "You've used all PDF downloads included in your plan. Please upgrade or renew to unlock more PDF downloads.",
+          pdfDownloadLimit: result.pdfDownloadLimit,
+          pdfDownloadsUsed: result.pdfDownloadsUsed,
+          pdfDownloadsRemaining: result.pdfDownloadsRemaining,
           trialPdfDownloads: result.trialPdfDownloads,
           maxTrialDownloads: result.maxTrialDownloads,
-          isSubscribed: false,
+          isSubscribed: result.isSubscribed,
         },
         { status: 403 }
       );
@@ -33,6 +36,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       allowed: true,
+      pdfDownloadLimit: result.pdfDownloadLimit,
+      pdfDownloadsUsed: result.pdfDownloadsUsed,
+      pdfDownloadsRemaining: result.pdfDownloadsRemaining,
       trialPdfDownloads: result.trialPdfDownloads,
       maxTrialDownloads: result.maxTrialDownloads,
       isSubscribed: result.isSubscribed,

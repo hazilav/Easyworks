@@ -31,9 +31,10 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     name: '1 Month',
     durationMonths: 1,
     priceINR: 249,
+    pdfDownloadLimit: 20,
     description: 'Full monthly access to commercial billing & quotations.',
     features: [
-      'Unlimited PDF downloads',
+      '20 Total PDF downloads',
       'All curated design templates',
       'Instant Quotation to Invoice conversion',
       'Custom logo & business branding',
@@ -46,8 +47,10 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     name: '3 Months',
     durationMonths: 3,
     priceINR: 649,
+    pdfDownloadLimit: 60,
     description: 'Quarterly subscription with significant savings.',
     features: [
+      '60 Total PDF downloads',
       'Everything in 1 Month plan',
       'Priority email & chat support',
       'Full financial calculation suite',
@@ -61,8 +64,10 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     name: '6 Months',
     durationMonths: 6,
     priceINR: 1099,
+    pdfDownloadLimit: 120,
     description: 'Half-yearly plan with maximum commercial savings.',
     features: [
+      '120 Total PDF downloads',
       'Everything in 3 Months plan',
       'Custom terms & conditions presets',
       'Maximum savings on billing',
@@ -75,8 +80,10 @@ const DEFAULT_PLANS: SubscriptionPlan[] = [
     name: 'Custom Plan',
     durationMonths: 12,
     priceINR: 0,
+    pdfDownloadLimit: 0,
     description: 'Custom duration, high-volume documents, and enterprise invoicing.',
     features: [
+      'Configurable PDF download limits',
       'Tailored contract duration',
       'Multiple users & branch offices',
       'Custom ERP/CRM integrations',
@@ -211,7 +218,7 @@ export default function PricingView({ embedded = false, onPlanSelected }: Pricin
           Choose the Perfect Plan for Your Business
         </h2>
         <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 max-w-xl mx-auto leading-relaxed">
-          Every new account includes a <strong className="text-slate-900 dark:text-white font-bold">7-Day Free Trial</strong> (2 PDF downloads included). Upgrade anytime to unlock <strong className="text-blue-600 dark:text-blue-400 font-bold">unlimited PDF downloads</strong> and multi-format commercial billing.
+          Every new account includes a <strong className="text-slate-900 dark:text-white font-bold">7-Day Free Trial</strong> (2 PDF downloads included). Upgrade anytime to unlock <strong className="text-blue-600 dark:text-blue-400 font-bold">higher PDF quotas (up to 120 PDFs)</strong> and multi-format commercial billing.
         </p>
       </div>
 

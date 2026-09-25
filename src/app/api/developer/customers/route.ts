@@ -7,6 +7,9 @@ import {
   cancelCustomerSubscription,
   manuallyActivateSubscription,
   resetCustomerAccess,
+  adjustCustomerPdfLimit,
+  addBonusPdfDownloads,
+  resetCustomerPdfUsage,
   verifyDeveloperSessionToken,
 } from '@/lib/db/database';
 
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { action, userId, planId, days, reason, durationMonths } = body;
+    const { action, userId, planId, days, reason, durationMonths, limit, bonus } = body;
 
     if (!action || !userId) {
       return NextResponse.json(
@@ -116,6 +119,41 @@ export async function POST(req: NextRequest) {
       case 'RESET_ACCESS': {
         const result = resetCustomerAccess(userId);
         return NextResponse.json(result);
+      }
+
+      case 'ADJUST_PDF_LIMIT': {
+        const limitNum = parseInt(limit, 10);
+        if (isNaN(limitNum) || limitNum < 0) {
+          return NextResponse.json({ success: false, error: 'Valid PDF download limit is required.' }, { status: 400 });
+        }
+        const updatedSub = adjustCustomerPdfLimit(userId, limitNum);
+        return NextResponse.json({
+          success: true,
+          message: `PDF download limit updated to ${limitNum}.`,
+          subscription: updatedSub,
+        });
+      }
+
+      case 'ADD_BONUS_PDF': {
+        const bonusNum = parseInt(bonus, 10);
+        if (isNaN(bonusNum) || bonusNum <= 0) {
+          return NextResponse.json({ success: false, error: 'Valid bonus amount is required.' }, { status: 400 });
+        }
+        const updatedSub = addBonusPdfDownloads(userId, bonusNum);
+        return NextResponse.json({
+          success: true,
+          message: `Added +${bonusNum} bonus PDF downloads.`,
+          subscription: updatedSub,
+        });
+      }
+
+      case 'RESET_PDF_USAGE': {
+        const updatedSub = resetCustomerPdfUsage(userId);
+        return NextResponse.json({
+          success: true,
+          message: 'PDF downloads usage counter reset to 0.',
+          subscription: updatedSub,
+        });
       }
 
       default:

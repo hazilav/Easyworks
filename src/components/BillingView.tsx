@@ -267,39 +267,78 @@ export default function BillingView() {
             </div>
 
             {/* PDF Downloads & Document Access Status */}
-            <div className="space-y-2 border-t md:border-t-0 md:border-l border-slate-100 dark:border-zinc-800 md:pl-6 pt-4 md:pt-0 flex flex-col justify-between">
+            <div className="space-y-3 border-t md:border-t-0 md:border-l border-slate-100 dark:border-zinc-800 md:pl-6 pt-4 md:pt-0 flex flex-col justify-between">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-                  PDF Download Quota
-                </span>
-                <div className="mt-1 flex items-center gap-1.5">
-                  {subscription?.status === 'ACTIVE' ? (
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Unlimited PDF downloads</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
-                      <FileText className="w-4 h-4 text-blue-500" />
-                      <span>
-                        {Math.max(0, 2 - (subscription?.trialPdfDownloads ?? 0))} / 2 PDF downloads remaining
-                      </span>
-                    </div>
-                  )}
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                    PDF Download Quota
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-700 dark:text-zinc-300">
+                    {subscription?.pdfDownloadsRemaining ?? 0} remaining
+                  </span>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">
-                  {subscription?.status === 'ACTIVE'
-                    ? 'Full commercial export privileges active.'
-                    : 'Document creation, editing, preview, and saving are always unlimited.'}
+
+                <div className="mt-2 flex items-center justify-between text-xs font-semibold text-slate-900 dark:text-white">
+                  <div className="flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-blue-500" />
+                    <span>
+                      {subscription?.pdfDownloadsUsed ?? 0} of {subscription?.pdfDownloadLimit ?? 2} used
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-normal">
+                    {Math.round(
+                      ((subscription?.pdfDownloadsUsed ?? 0) /
+                        Math.max(1, subscription?.pdfDownloadLimit ?? 2)) *
+                        100
+                    )}
+                    %
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="mt-2 w-full h-2 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      (subscription?.pdfDownloadsRemaining ?? 0) <= 0
+                        ? 'bg-red-500'
+                        : (subscription?.pdfDownloadsRemaining ?? 0) <= 5
+                        ? 'bg-amber-500'
+                        : 'bg-blue-600'
+                    }`}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round(
+                          ((subscription?.pdfDownloadsUsed ?? 0) /
+                            Math.max(1, subscription?.pdfDownloadLimit ?? 2)) *
+                            100
+                        )
+                      )}%`,
+                    }}
+                  />
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-2">
+                  {(subscription?.pdfDownloadsRemaining ?? 0) <= 0 ? (
+                    <span className="text-red-500 font-semibold">
+                      PDF download limit reached. Upgrade or renew to download more PDFs.
+                    </span>
+                  ) : (
+                    'Document creation, editing, preview, and saving remain unlimited.'
+                  )}
                 </p>
               </div>
 
-              {subscription?.status !== 'ACTIVE' && (
+              {((subscription?.pdfDownloadsRemaining ?? 0) <= 0 || subscription?.status !== 'ACTIVE') && (
                 <button
                   onClick={() => setShowUpgradePlans(true)}
                   className="mt-2 w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
                 >
-                  <span>Upgrade — Starting ₹249/mo</span>
+                  <span>
+                    {(subscription?.pdfDownloadsRemaining ?? 0) <= 0 && subscription?.status === 'ACTIVE'
+                      ? 'Renew / Add Quota'
+                      : 'Upgrade — Starting ₹249/mo'}
+                  </span>
                   <ArrowUpRight className="w-3.5 h-3.5" />
                 </button>
               )}

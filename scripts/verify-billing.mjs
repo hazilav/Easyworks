@@ -32,8 +32,8 @@ async function runTests() {
   const plan6m = plans.find(p => p.durationMonths === 6);
   const planCustom = plans.find(p => p.isCustom);
   assert(plan1m && plan1m.priceINR === 249, '1 Month plan should be ₹249');
-  assert(plan3m && plan3m.priceINR === 1299, '3 Month plan should be ₹1299');
-  assert(plan6m && plan6m.priceINR === 2199, '6 Month plan should be ₹2199');
+  assert(plan3m && plan3m.priceINR === 649, '3 Month plan should be ₹649');
+  assert(plan6m && plan6m.priceINR === 1099, '6 Month plan should be ₹1099');
   assert(planCustom && planCustom.isCustom, 'Custom plan should exist');
   console.log('✔ PASS: Database initialized with correct plans.\n');
 
