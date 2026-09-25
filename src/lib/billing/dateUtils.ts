@@ -97,12 +97,18 @@ export function evaluateSubscriptionStatus(sub: {
 
   // If manual payment is pending verification
   if (sub.status === 'PAYMENT_PENDING') {
-    const trialEnd = new Date(sub.trialEndsAt).getTime();
-    const trialValid = nowTime <= trialEnd;
-    const days = trialValid ? Math.ceil((trialEnd - nowTime) / (1000 * 60 * 60 * 24)) : 0;
+    const paidEnd = sub.subscriptionEndsAt ? new Date(sub.subscriptionEndsAt).getTime() : 0;
+    const trialEnd = sub.trialEndsAt ? new Date(sub.trialEndsAt).getTime() : 0;
+    const hasPaidAccess = paidEnd > nowTime;
+    const hasTrialAccess = trialEnd > nowTime;
+    const days = hasPaidAccess
+      ? Math.ceil((paidEnd - nowTime) / (1000 * 60 * 60 * 24))
+      : hasTrialAccess
+      ? Math.ceil((trialEnd - nowTime) / (1000 * 60 * 60 * 24))
+      : 0;
     return {
       effectiveStatus: 'PAYMENT_PENDING',
-      hasAccess: trialValid,
+      hasAccess: hasPaidAccess || hasTrialAccess,
       daysRemaining: days,
     };
   }

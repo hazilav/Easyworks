@@ -32,13 +32,18 @@ import { DeveloperCustomerSummary, SubscriptionPlan } from '@/types';
 interface DeveloperCustomersViewProps {
   plans: SubscriptionPlan[];
   onRefreshStats: () => void;
+  initialFilter?: string;
 }
 
-export default function DeveloperCustomersView({ plans, onRefreshStats }: DeveloperCustomersViewProps) {
+export default function DeveloperCustomersView({ plans, onRefreshStats, initialFilter }: DeveloperCustomersViewProps) {
   const [customers, setCustomers] = useState<DeveloperCustomerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState(initialFilter || 'all');
+
+  useEffect(() => {
+    if (initialFilter) setFilter(initialFilter);
+  }, [initialFilter]);
 
   // Selected customer for detailed modal
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);

@@ -83,7 +83,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
           name: editingPlan.name,
           durationMonths: editingPlan.durationMonths,
           priceINR: editingPlan.priceINR,
-          pdfDownloadLimit: editingPlan.pdfDownloadLimit ?? 20,
+          pdfDownloadLimit: editingPlan.pdfDownloadLimit ?? 30,
           description: editingPlan.description,
           features: editingPlan.features,
           isActive: editingPlan.isActive,
@@ -358,7 +358,7 @@ export default function DeveloperPlansView({ plans, onRefreshPlans }: DeveloperP
                     type="number"
                     min={0}
                     required
-                    value={editingPlan.pdfDownloadLimit ?? 20}
+                    value={editingPlan.pdfDownloadLimit ?? 30}
                     onChange={(e) =>
                       setEditingPlan({ ...editingPlan, pdfDownloadLimit: parseInt(e.target.value, 10) || 0 })
                     }

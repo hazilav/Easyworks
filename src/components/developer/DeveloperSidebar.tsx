@@ -14,16 +14,25 @@ import {
   ShieldCheck,
   Activity,
   X,
+  Building2,
+  FileText,
+  CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 
 export type DeveloperTab =
   | 'dashboard'
   | 'customers'
-  | 'plans'
+  | 'subscriptions'
   | 'payments'
+  | 'plans'
+  | 'trials'
+  | 'templates'
+  | 'businesses'
+  | 'documents'
+  | 'settings'
   | 'security'
-  | 'audit'
-  | 'settings';
+  | 'audit';
 
 interface DeveloperSidebarProps {
   currentTab: DeveloperTab;
@@ -47,17 +56,22 @@ export default function DeveloperSidebar({
   const navItems = [
     { id: 'dashboard' as DeveloperTab, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'customers' as DeveloperTab, label: 'Customers', icon: Users },
-    { id: 'plans' as DeveloperTab, label: 'Subscription Plans', icon: Layers },
+    { id: 'subscriptions' as DeveloperTab, label: 'Subscriptions', icon: CheckCircle2 },
     {
       id: 'payments' as DeveloperTab,
-      label: 'Manual Payments',
+      label: 'Payments',
       icon: CreditCard,
       badge: pendingPaymentsCount > 0 ? pendingPaymentsCount : undefined,
       badgeColor: 'bg-amber-500 text-black',
     },
-    { id: 'security' as DeveloperTab, label: 'Trial & Abuse Security', icon: ShieldAlert },
-    { id: 'audit' as DeveloperTab, label: 'Activity & Audit Log', icon: Activity },
-    { id: 'settings' as DeveloperTab, label: 'Payment & App Settings', icon: Settings },
+    { id: 'plans' as DeveloperTab, label: 'Plans', icon: Layers },
+    { id: 'trials' as DeveloperTab, label: 'Trials', icon: Clock },
+    { id: 'templates' as DeveloperTab, label: 'Templates', icon: Sparkles },
+    { id: 'businesses' as DeveloperTab, label: 'Businesses', icon: Building2 },
+    { id: 'documents' as DeveloperTab, label: 'Documents', icon: FileText },
+    { id: 'settings' as DeveloperTab, label: 'Settings', icon: Settings },
+    { id: 'security' as DeveloperTab, label: 'Security', icon: ShieldAlert },
+    { id: 'audit' as DeveloperTab, label: 'Activity Logs', icon: Activity },
   ];
 
   const handleSelect = (tab: DeveloperTab) => {

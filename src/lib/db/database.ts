@@ -67,7 +67,7 @@ function initDatabase(db: DatabaseSync) {
       name TEXT NOT NULL,
       duration_months INTEGER NOT NULL,
       price_inr INTEGER NOT NULL,
-      pdf_download_limit INTEGER NOT NULL DEFAULT 20,
+      pdf_download_limit INTEGER NOT NULL DEFAULT 30,
       description TEXT NOT NULL,
       features_json TEXT NOT NULL,
       is_active INTEGER NOT NULL DEFAULT 1,
@@ -1289,18 +1289,21 @@ export function activateSubscription({
   let newStart = now;
   let newEnd: Date;
 
-  // Check if this is an active renewal of the same plan
-  const isSamePlanRenewal = existing && existing.status === 'ACTIVE' && existing.planId === plan.id;
+  // Check if this is an active renewal or upgrade with existing valid subscription time
+  const hasRemainingPaidTime = Boolean(
+    existing &&
+    existing.subscriptionEndsAt &&
+    new Date(existing.subscriptionEndsAt).getTime() > now.getTime()
+  );
 
-  // If already active and not expired, extend from existing expiry date
-  if (existing && existing.status === 'ACTIVE' && existing.subscriptionEndsAt) {
+  const isSamePlanRenewal = Boolean(hasRemainingPaidTime && existing?.planId === plan.id);
+  const isUpgrade = Boolean(hasRemainingPaidTime && existing?.planId !== plan.id);
+
+  // If there is existing valid paid time, extend from existing expiry date
+  if (hasRemainingPaidTime && existing?.subscriptionEndsAt) {
     const curEnd = new Date(existing.subscriptionEndsAt);
-    if (curEnd.getTime() > now.getTime()) {
-      newStart = new Date(existing.subscriptionStartedAt || now.toISOString());
-      newEnd = addCalendarMonths(curEnd, plan.durationMonths);
-    } else {
-      newEnd = addCalendarMonths(now, plan.durationMonths);
-    }
+    newStart = new Date(existing.subscriptionStartedAt || now.toISOString());
+    newEnd = addCalendarMonths(curEnd, plan.durationMonths);
   } else {
     newEnd = addCalendarMonths(now, plan.durationMonths);
   }
@@ -1310,20 +1313,47 @@ export function activateSubscription({
   const endISO = newEnd.toISOString();
 
   const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 30 : plan.id === 'plan_3m' ? 90 : plan.id === 'plan_6m' ? 180 : 30);
-  // When a subscription is renewed or upgraded, create/reset the PDF allowance for the new period (Requirement 12 & 13)
+  // When a subscription is renewed or upgraded, create/reset the PDF allowance for the new period (Requirement 16 & 17)
   const newPdfLimit = planPdfLimit;
   const newPdfUsed = 0;
 
   runInTransaction(() => {
-    db.prepare(`
-      UPDATE subscriptions
-      SET plan_id = ?, status = 'ACTIVE', subscription_started_at = ?, subscription_ends_at = ?,
-          gateway_subscription_id = ?, pdf_download_limit = ?, pdf_downloads_used = ?, trial_pdf_downloads = ?, updated_at = ?
-      WHERE user_id = ?
-    `).run(plan.id, startISO, endISO, gatewaySubscriptionId || null, newPdfLimit, newPdfUsed, newPdfUsed, nowISO, userId);
+    const subCheck = db.prepare('SELECT id FROM subscriptions WHERE user_id = ?').get(userId);
+    if (!subCheck) {
+      db.prepare(`
+        INSERT INTO subscriptions (
+          id, user_id, plan_id, status, trial_started_at, trial_ends_at,
+          subscription_started_at, subscription_ends_at, gateway_subscription_id,
+          pdf_download_limit, pdf_downloads_used, trial_pdf_downloads, created_at, updated_at
+        ) VALUES (?, ?, ?, 'ACTIVE', null, null, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('sub_' + userId, userId, plan.id, startISO, endISO, gatewaySubscriptionId || null, newPdfLimit, newPdfUsed, newPdfUsed, nowISO, nowISO);
+    } else {
+      db.prepare(`
+        UPDATE subscriptions
+        SET plan_id = ?, status = 'ACTIVE', subscription_started_at = ?, subscription_ends_at = ?,
+            gateway_subscription_id = ?, pdf_download_limit = ?, pdf_downloads_used = ?, trial_pdf_downloads = ?, updated_at = ?
+        WHERE user_id = ?
+      `).run(plan.id, startISO, endISO, gatewaySubscriptionId || null, newPdfLimit, newPdfUsed, newPdfUsed, nowISO, userId);
+    }
+
+    // Convert trial identity so trial limits are lifted
+    try {
+      db.prepare(`
+        UPDATE trial_identities
+        SET eligibility_status = 'CONVERTED', updated_at = ?
+        WHERE user_id = ?
+      `).run(nowISO, userId);
+    } catch {}
   });
 
-  logActivity(userId, 'SUBSCRIPTION_ACTIVATED', `Activated ${plan.name} (${planPdfLimit} PDFs) until ${endISO.split('T')[0]}`, 'SYSTEM');
+  const actionType = isUpgrade ? 'SUBSCRIPTION_UPGRADED' : isSamePlanRenewal ? 'SUBSCRIPTION_RENEWED' : 'SUBSCRIPTION_ACTIVATED';
+  const actionMsg = isUpgrade
+    ? `Upgraded to ${plan.name} (${planPdfLimit} PDFs) until ${endISO.split('T')[0]}`
+    : isSamePlanRenewal
+    ? `Renewed ${plan.name} (${planPdfLimit} PDFs) until ${endISO.split('T')[0]}`
+    : `Activated ${plan.name} (${planPdfLimit} PDFs) until ${endISO.split('T')[0]}`;
+
+  logActivity(userId, actionType, actionMsg, 'SYSTEM');
 
   return getUserSubscription(userId)!;
 }
@@ -1858,6 +1888,14 @@ export function approveManualPayment(
       WHERE id = ?
     `).run(adminName, nowISO, nowISO, requestId);
 
+    // 4. Log payment approval activity
+    logActivity(
+      req.user_id,
+      'PAYMENT_VERIFIED',
+      `Manual payment of ₹${req.amount_inr} approved by ${adminName}. UTR: ${req.utr_number}. Plan: ${req.plan_name}`,
+      'SUPER_ADMIN'
+    );
+
     return { success: true, subscription, payment };
   });
 }
@@ -1886,6 +1924,13 @@ export function rejectManualPayment(
     SET status = 'PAYMENT_REJECTED', updated_at = ?
     WHERE user_id = ?
   `).run(nowISO, req.user_id);
+
+  logActivity(
+    req.user_id,
+    'PAYMENT_REJECTED',
+    `Manual payment for ₹${req.amount_inr} rejected by ${adminName}. Reason: ${reason}`,
+    'SUPER_ADMIN'
+  );
 
   return { success: true };
 }
@@ -2995,7 +3040,7 @@ export function changeCustomerPlan(userId: string, newPlanId: string): Subscript
   if (!plan) return null;
 
   const nowISO = new Date().toISOString();
-  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 20 : plan.id === 'plan_3m' ? 60 : plan.id === 'plan_6m' ? 120 : 20);
+  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 30 : plan.id === 'plan_3m' ? 90 : plan.id === 'plan_6m' ? 180 : 30);
 
   runInTransaction(() => {
     db.prepare(`
@@ -3039,7 +3084,7 @@ export function manuallyActivateSubscription(
   const nowISO = now.toISOString();
   const end = addCalendarMonths(now, months);
   const endISO = end.toISOString();
-  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 20 : plan.id === 'plan_3m' ? 60 : plan.id === 'plan_6m' ? 120 : 20);
+  const planPdfLimit = plan.pdfDownloadLimit || (plan.id === 'plan_1m' ? 30 : plan.id === 'plan_3m' ? 90 : plan.id === 'plan_6m' ? 180 : 30);
 
   // Record a payment entry
   const paymentId = 'pay_manual_' + Date.now();
@@ -3356,7 +3401,7 @@ export function createPlan(plan: Omit<SubscriptionPlan, 'id'>): SubscriptionPlan
   const db = getDatabase();
   const now = new Date().toISOString();
   const id = 'plan_' + Date.now();
-  const pdfLimit = plan.pdfDownloadLimit ?? 20;
+  const pdfLimit = plan.pdfDownloadLimit ?? 30;
 
   db.prepare(`
     INSERT INTO plans (id, name, duration_months, price_inr, pdf_download_limit, description, features_json, is_active, is_popular, is_custom, created_at, updated_at)
@@ -3377,5 +3422,117 @@ export function createPlan(plan: Omit<SubscriptionPlan, 'id'>): SubscriptionPlan
   );
   logActivity(undefined, 'PLAN_CREATED', `New plan created: ${plan.name} (₹${plan.priceINR}, ${pdfLimit} PDFs)`, 'SUPER_ADMIN');
   return getPlanById(id)!;
+}
+
+export function getAllBusinessesOverview(): any[] {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT 
+      u.id as user_id,
+      u.name as owner_name,
+      u.email,
+      u.phone,
+      u.business_name,
+      u.status as user_status,
+      u.created_at,
+      b.currency,
+      s.status as subscription_status,
+      s.plan_id,
+      p.name as plan_name,
+      s.pdf_download_limit,
+      s.pdf_downloads_used,
+      (SELECT COUNT(*) FROM quotations q WHERE q.user_id = u.id) as quotations_count,
+      (SELECT COUNT(*) FROM invoices i WHERE i.user_id = u.id) as invoices_count
+    FROM users u
+    LEFT JOIN businesses b ON b.user_id = u.id
+    LEFT JOIN subscriptions s ON s.user_id = u.id
+    LEFT JOIN plans p ON p.id = s.plan_id
+    WHERE u.role != 'developer'
+    ORDER BY u.created_at DESC
+  `).all() as any[];
+
+  return rows.map((r) => ({
+    userId: r.user_id,
+    ownerName: r.owner_name,
+    email: r.email,
+    phone: r.phone || '—',
+    businessName: r.business_name || 'Individual Contractor',
+    userStatus: r.user_status,
+    currency: r.currency || 'INR',
+    createdAt: r.created_at,
+    subscriptionStatus: r.subscription_status || 'TRIALING',
+    planName: r.plan_name || 'Free Trial',
+    pdfLimit: r.pdf_download_limit ?? 2,
+    pdfUsed: r.pdf_downloads_used ?? 0,
+    quotationsCount: r.quotations_count || 0,
+    invoicesCount: r.invoices_count || 0,
+    totalDocuments: (r.quotations_count || 0) + (r.invoices_count || 0),
+  }));
+}
+
+export function getAllDocumentsOverview(typeFilter?: 'all' | 'quotations' | 'invoices', search?: string): any[] {
+  const db = getDatabase();
+  let items: any[] = [];
+
+  const includeQuotes = !typeFilter || typeFilter === 'all' || typeFilter === 'quotations';
+  const includeInvoices = !typeFilter || typeFilter === 'all' || typeFilter === 'invoices';
+
+  if (includeQuotes) {
+    const qRows = db.prepare(`
+      SELECT 
+        q.id,
+        'quotation' as type,
+        q.quotation_number as document_number,
+        q.title,
+        q.customer_name,
+        q.grand_total,
+        q.currency,
+        q.status,
+        q.created_at,
+        u.name as creator_name,
+        u.business_name
+      FROM quotations q
+      JOIN users u ON u.id = q.user_id
+      ORDER BY q.created_at DESC
+    `).all() as any[];
+    items.push(...qRows);
+  }
+
+  if (includeInvoices) {
+    const iRows = db.prepare(`
+      SELECT 
+        i.id,
+        'invoice' as type,
+        i.invoice_number as document_number,
+        i.title,
+        i.customer_name,
+        i.grand_total,
+        i.currency,
+        i.status,
+        i.created_at,
+        u.name as creator_name,
+        u.business_name
+      FROM invoices i
+      JOIN users u ON u.id = i.user_id
+      ORDER BY i.created_at DESC
+    `).all() as any[];
+    items.push(...iRows);
+  }
+
+  // Sort by created_at DESC
+  items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  if (search && search.trim()) {
+    const s = search.trim().toLowerCase();
+    items = items.filter(
+      (item) =>
+        (item.document_number && item.document_number.toLowerCase().includes(s)) ||
+        (item.customer_name && item.customer_name.toLowerCase().includes(s)) ||
+        (item.creator_name && item.creator_name.toLowerCase().includes(s)) ||
+        (item.business_name && item.business_name.toLowerCase().includes(s))
+    );
+  }
+
+  return items;
 }
 

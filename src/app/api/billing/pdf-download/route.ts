@@ -63,17 +63,16 @@ export async function POST(req: NextRequest) {
       if (result.reason === 'NOT_FOUND') {
         return apiError(result.message || 'User account or subscription record not found.', 404, 'USER_NOT_FOUND');
       }
+      const isLimitReached = result.reason === 'LIMIT_REACHED';
+      const defaultErr = isLimitReached ? 'PDF download limit reached' : (result.message || 'PDF download not allowed');
       return NextResponse.json(
         {
           success: false,
           allowed: false,
+          code: isLimitReached ? 'PDF_LIMIT_REACHED' : (result.reason || 'PDF_DOWNLOAD_DENIED'),
           reason: result.reason,
+          error: defaultErr,
           message:
-            result.message ||
-            (result.isSubscribed
-              ? 'PDF download limit reached. Upgrade or renew your plan to continue.'
-              : "You've used all 2 trial PDF downloads. Subscribe to continue downloading PDFs."),
-          error:
             result.message ||
             (result.isSubscribed
               ? 'PDF download limit reached. Upgrade or renew your plan to continue.'

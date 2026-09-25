@@ -9,6 +9,9 @@ import DeveloperPlansView from '@/components/developer/DeveloperPlansView';
 import DeveloperPaymentsView from '@/components/developer/DeveloperPaymentsView';
 import DeveloperSecurityView from '@/components/developer/DeveloperSecurityView';
 import DeveloperAuditView from '@/components/developer/DeveloperAuditView';
+import DeveloperBusinessesView from '@/components/developer/DeveloperBusinessesView';
+import DeveloperDocumentsView from '@/components/developer/DeveloperDocumentsView';
+import DeveloperTemplatesView from '@/components/developer/DeveloperTemplatesView';
 import { DeveloperStats, SubscriptionPlan } from '@/types';
 import { Menu } from 'lucide-react';
 import { safeFetchJson } from '@/lib/api/client';
@@ -213,8 +216,28 @@ export default function DeveloperPage() {
 
         {currentTab === 'customers' && (
           <DeveloperCustomersView
+            key="all-customers"
             plans={plans}
             onRefreshStats={loadStats}
+            initialFilter="all"
+          />
+        )}
+
+        {currentTab === 'subscriptions' && (
+          <DeveloperCustomersView
+            key="subscriptions-filter"
+            plans={plans}
+            onRefreshStats={loadStats}
+            initialFilter="active"
+          />
+        )}
+
+        {currentTab === 'trials' && (
+          <DeveloperCustomersView
+            key="trials-filter"
+            plans={plans}
+            onRefreshStats={loadStats}
+            initialFilter="trial"
           />
         )}
 
@@ -229,6 +252,18 @@ export default function DeveloperPage() {
           <DeveloperPaymentsView
             onRefreshStats={loadStats}
           />
+        )}
+
+        {currentTab === 'templates' && (
+          <DeveloperTemplatesView />
+        )}
+
+        {currentTab === 'businesses' && (
+          <DeveloperBusinessesView />
+        )}
+
+        {currentTab === 'documents' && (
+          <DeveloperDocumentsView />
         )}
 
         {currentTab === 'security' && (
