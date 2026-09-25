@@ -60,6 +60,9 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.allowed) {
+      if (result.reason === 'NOT_FOUND') {
+        return apiError(result.message || 'User account or subscription record not found.', 404, 'USER_NOT_FOUND');
+      }
       return NextResponse.json(
         {
           success: false,

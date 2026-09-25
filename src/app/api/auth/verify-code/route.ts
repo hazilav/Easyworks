@@ -2,83 +2,106 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   verifyVerificationCode,
   checkRateLimit,
+  completeVerifiedSignup,
   createOrUpdateTrialIdentity,
   evaluateTrialEligibility,
   getTrialIdentityByUserId,
+  getUserById,
 } from '@/lib/db/database';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
-  let userId: string | undefined;
+  let verifiedUserId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
       return parsed.response;
     }
     const body = parsed.body || {};
-    userId = body.userId;
-    const { target, code, channel } = body;
+    const { target, code, channel, signupSessionId, name, businessName } = body;
+    let userId = body.userId;
 
-    if (!target || !code || !channel || !userId) {
-      return apiError('Target, verification code, channel, and userId are required.', 400);
+    if (!target || !code || !channel) {
+      return apiError('Target, verification code, and channel are required.', 400, 'BAD_REQUEST');
     }
 
     const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
 
-    // 1. Sliding window rate limit: Max 6 verification attempts per target per 10 minutes
-    const rateCheck = checkRateLimit(`otp_verify_${normalizedTarget}`, 6, 600);
+    // 1. Sliding window rate limit: Max 5 verification attempts per target per 10 minutes
+    const rateCheck = checkRateLimit(`otp_verify_${normalizedTarget}`, 5, 600);
     if (!rateCheck.allowed) {
       return apiError(
-        `Too many failed attempts. Please wait ${rateCheck.resetInSeconds} seconds before trying again.`,
+        'Too many failed attempts. Please wait before trying again.',
         429,
         'RATE_LIMITED',
         { resetInSeconds: rateCheck.resetInSeconds }
       );
     }
 
-    // 2. Verify code
-    const result = verifyVerificationCode(normalizedTarget, code);
+    // 2. Authoritatively verify code (hashed comparison, attempt limit, single-use invalidation)
+    const result = verifyVerificationCode(normalizedTarget, code, signupSessionId);
     if (!result.success) {
-      return apiError(result.error || 'Invalid verification code.', 400);
+      return apiError(result.error || 'Invalid verification code.', 400, result.code || 'INVALID_CODE');
     }
 
-    // 3. Mark identity as verified
-    let identity: any;
+    // 3. Complete user lifecycle upon verified email:
+    // Create/activate user -> Create business -> Create 7-day trial with 2 PDF limit -> Create trial identity
+    let userResult: any = null;
+    let subscriptionResult: any = null;
+
+    const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || '127.0.0.1';
+    const deviceId = req.headers.get('x-device-id') || req.cookies.get('easyworks_device_id')?.value;
+
     if (channel === 'EMAIL') {
-      identity = createOrUpdateTrialIdentity({
-        userId,
+      const signup = completeVerifiedSignup({
         email: target,
-        emailVerified: true,
+        name,
+        businessName,
+        deviceId,
+        ipAddress,
       });
+      userResult = signup.user;
+      subscriptionResult = signup.subscription;
+      userId = signup.user.id;
+      verifiedUserId = userId;
     } else if (channel === 'SMS') {
-      identity = createOrUpdateTrialIdentity({
-        userId,
-        email: target,
-        phone: target,
-        phoneVerified: true,
-      });
+      if (userId) {
+        const existingUser = getUserById(userId);
+        if (existingUser) {
+          createOrUpdateTrialIdentity({
+            userId,
+            email: existingUser.email,
+            phone: target,
+            phoneVerified: true,
+            deviceId,
+            ipAddress,
+          });
+          userResult = existingUser;
+          verifiedUserId = userId;
+        }
+      }
     }
 
-    // 4. If both email and phone are now verified, run eligibility engine
+    // 4. Run trial abuse & eligibility evaluation for the verified identity
     let eligibilityResult = null;
-    const current = getTrialIdentityByUserId(userId);
-    if (current && current.emailVerified && current.phoneVerified) {
-      const ipAddress = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '127.0.0.1';
-      const deviceId = req.headers.get('x-device-id') || req.cookies.get('easyworks_device_id')?.value;
+    const currentIdentity = userId ? getTrialIdentityByUserId(userId) : null;
+    if (userId && currentIdentity?.emailVerified) {
       eligibilityResult = evaluateTrialEligibility(userId, { deviceId, ipAddress });
     }
 
     return apiSuccess({
       message: `${channel === 'EMAIL' ? 'Email' : 'Phone'} verified successfully.`,
-      identity: current,
+      user: userResult,
+      subscription: subscriptionResult,
+      identity: currentIdentity,
       eligibility: eligibilityResult,
     });
   } catch (error: any) {
     return apiError(error, 500, 'INTERNAL_SERVER_ERROR', {
       apiRoute: '/api/auth/verify-code',
       method: 'POST',
-      userId,
+      userId: verifiedUserId,
     });
   }
 }

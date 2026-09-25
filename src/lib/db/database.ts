@@ -222,6 +222,8 @@ function initDatabase(db: DatabaseSync) {
       target TEXT NOT NULL,
       channel TEXT NOT NULL,
       code TEXT NOT NULL,
+      code_hash TEXT,
+      signup_session_id TEXT,
       expires_at TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
       verified_at TEXT,
@@ -326,6 +328,8 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE plans ADD COLUMN pdf_download_limit INTEGER NOT NULL DEFAULT 30;'); } catch {}
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_download_limit INTEGER NOT NULL DEFAULT 2;'); } catch {}
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_downloads_used INTEGER NOT NULL DEFAULT 0;'); } catch {}
+  try { db.exec('ALTER TABLE verification_codes ADD COLUMN signup_session_id TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE verification_codes ADD COLUMN code_hash TEXT;'); } catch {}
 
   // Update plan prices, names, and PDF download limits: Basic=299 (30), Standard=849 (90), Premium=1699 (180)
   try {
@@ -658,6 +662,139 @@ export function ensureUserExists(
   }
 }
 
+export function getUserById(userId: string): any {
+  if (!userId) return null;
+  const db = getDatabase();
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+}
+
+export function getUserByEmail(email: string): any {
+  if (!email) return null;
+  const db = getDatabase();
+  const cleanEmail = email.trim().toLowerCase();
+  return db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(cleanEmail);
+}
+
+export function isEmailRegistered(email: string): boolean {
+  if (!email) return false;
+  const db = getDatabase();
+  const cleanEmail = email.trim().toLowerCase();
+  const row = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(cleanEmail) as any;
+  return Boolean(row?.id);
+}
+
+export function completeVerifiedSignup(data: {
+  email: string;
+  name?: string;
+  businessName?: string;
+  phone?: string;
+  deviceId?: string;
+  ipAddress?: string;
+}): { user: any; subscription: Subscription; identity: TrialIdentity } {
+  const db = getDatabase();
+  const now = new Date();
+  const nowISO = now.toISOString();
+  const cleanEmail = data.email.trim().toLowerCase();
+
+  // 1. Check if user already exists
+  let user = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(cleanEmail) as any;
+  let userId: string;
+
+  if (user) {
+    userId = user.id;
+  } else {
+    // Generate authoritative server-side user ID
+    userId = 'usr_' + crypto.randomBytes(6).toString('hex');
+    const isFirstUser = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c === 0;
+    const role = isFirstUser ? 'admin' : 'user';
+    const userName = data.name?.trim() || cleanEmail.split('@')[0];
+    const userBizName = data.businessName?.trim() || `${userName}'s Business`;
+
+    db.prepare(`
+      INSERT INTO users (id, email, name, business_name, role, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+    `).run(userId, cleanEmail, userName, userBizName, role, nowISO);
+
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+
+    // Business record
+    const existingBiz = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId);
+    if (!existingBiz) {
+      db.prepare(`
+        INSERT INTO businesses (id, user_id, business_name, owner_name, currency, created_at)
+        VALUES (?, ?, ?, ?, 'INR', ?)
+      `).run('biz_' + userId, userId, userBizName, userName, nowISO);
+    }
+  }
+
+  // 2. Ensure 7-day trial subscription (idempotent, 2 PDF downloads)
+  let subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+  if (!subRow) {
+    const trialStart = now;
+    const trialEnd = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const subId = 'sub_' + userId;
+
+    db.prepare(`
+      INSERT INTO subscriptions (
+        id, user_id, plan_id, status, trial_started_at, trial_ends_at,
+        subscription_started_at, subscription_ends_at, pdf_download_limit, pdf_downloads_used,
+        trial_pdf_downloads, created_at, updated_at
+      ) VALUES (?, ?, ?, 'TRIALING', ?, ?, null, null, 2, 0, 0, ?, ?)
+    `).run(subId, userId, 'plan_1m', trialStart.toISOString(), trialEnd.toISOString(), nowISO, nowISO);
+  }
+
+  // 3. Ensure trial_identities record
+  let identityRow = db.prepare('SELECT * FROM trial_identities WHERE user_id = ?').get(userId) as any;
+  const normEmail = normalizeEmail(cleanEmail);
+  const normPhone = data.phone ? normalizePhone(data.phone) : undefined;
+  const normBiz = user.business_name ? normalizeBusinessName(user.business_name) : undefined;
+  const bizDomain = extractDomain(cleanEmail);
+
+  if (!identityRow) {
+    db.prepare(`
+      INSERT INTO trial_identities (
+        id, user_id, business_id, email, normalized_email, phone, normalized_phone,
+        email_verified, phone_verified, business_name, normalized_business_name,
+        business_domain, gstin, device_id, ip_address, eligibility_status,
+        abuse_risk_score, trial_started_at, trial_ends_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, null, ?, ?, 'ELIGIBLE', 0, ?, ?, ?, ?)
+    `).run(
+      'tid_' + userId,
+      userId,
+      'biz_' + userId,
+      cleanEmail,
+      normEmail,
+      data.phone || null,
+      normPhone || null,
+      data.phone ? 1 : 0,
+      user.business_name || null,
+      normBiz || null,
+      bizDomain,
+      data.deviceId || null,
+      data.ipAddress || null,
+      nowISO,
+      new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      nowISO,
+      nowISO
+    );
+  } else {
+    db.prepare(`
+      UPDATE trial_identities
+      SET email_verified = 1,
+          phone = COALESCE(?, phone),
+          normalized_phone = COALESCE(?, normalized_phone),
+          phone_verified = CASE WHEN ? IS NOT NULL THEN 1 ELSE phone_verified END,
+          updated_at = ?
+      WHERE user_id = ?
+    `).run(data.phone || null, normPhone || null, data.phone || null, nowISO, userId);
+  }
+
+  const subscription = getUserSubscription(userId)!;
+  const identity = getTrialIdentityByUserId(userId)!;
+
+  return { user, subscription, identity };
+}
+
 export function ensureUserAndTrial(
   userId: string,
   email: string,
@@ -887,14 +1024,21 @@ export function verifyAndConsumeTrialPdfDownload(
   options?: string | VerifyPdfDownloadOptions
 ): VerifyPdfDownloadResult {
   const db = getDatabase();
-  ensureUserExists(userId);
-  let userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
-  let subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
+  const userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
+  const subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
 
-  if (!subRow) {
-    ensureUserAndTrial(userId, `${userId}@easyworks.local`, 'Customer');
-    subRow = db.prepare('SELECT * FROM subscriptions WHERE user_id = ?').get(userId) as any;
-    userRow = db.prepare('SELECT status, business_name FROM users WHERE id = ?').get(userId) as any;
+  if (!userRow || !subRow) {
+    return {
+      allowed: false,
+      reason: 'NOT_FOUND',
+      pdfDownloadLimit: 2,
+      pdfDownloadsUsed: 0,
+      pdfDownloadsRemaining: 0,
+      trialPdfDownloads: 0,
+      maxTrialDownloads: 2,
+      isSubscribed: false,
+      message: 'User account or subscription record not found.',
+    };
   }
 
   const opts: VerifyPdfDownloadOptions =
@@ -1549,10 +1693,13 @@ export function createManualPaymentRequest({
   const plan = getPlanById(planId);
   if (!plan) throw new Error('Plan not found: ' + planId);
 
-  ensureUserExists(userId);
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    throw new Error('User not found: ' + userId);
+  }
   const sub = db.prepare('SELECT id FROM subscriptions WHERE user_id = ?').get(userId);
   if (!sub) {
-    ensureUserAndTrial(userId, `${userId}@easyworks.local`, 'Customer');
+    throw new Error('No active subscription found for user: ' + userId);
   }
 
   const id = 'mpr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -1804,9 +1951,10 @@ export function createOrUpdateTrialIdentity(data: {
 }): TrialIdentity {
   const db = getDatabase();
   const nowISO = new Date().toISOString();
-
-  // Ensure the user account exists so foreign key constraints on user_id succeed
-  ensureUserExists(data.userId, data.email, data.name, data.businessName);
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(data.userId);
+  if (!user) {
+    throw new Error('User not found: ' + data.userId);
+  }
 
   const normalizedEmail = normalizeEmail(data.email);
   const normalizedPhone = data.phone ? normalizePhone(data.phone) : undefined;
@@ -1886,12 +2034,13 @@ export function createOrUpdateTrialIdentity(data: {
 }
 
 /**
- * Creates a secure 6-digit numeric verification code (10-minute expiry).
+ * Creates a secure 6-digit numeric verification code (10-minute expiry) with SHA-256 hash storage.
  */
 export function createVerificationCode(
   target: string,
-  channel: 'EMAIL' | 'SMS'
-): { id: string; code: string; expiresAt: string } {
+  channel: 'EMAIL' | 'SMS',
+  signupSessionId?: string
+): { id: string; code: string; expiresAt: string; signupSessionId: string } {
   const db = getDatabase();
   const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
 
@@ -1901,6 +2050,10 @@ export function createVerificationCode(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
   const nowISO = now.toISOString();
+  const sessionId = signupSessionId || 'ss_' + crypto.randomBytes(8).toString('hex');
+
+  // Compute SHA-256 code hash with target salt
+  const codeHash = crypto.createHash('sha256').update(code.trim() + ':' + normalizedTarget).digest('hex');
 
   // Invalidate any older unverified codes for this target
   db.prepare(`
@@ -1908,54 +2061,69 @@ export function createVerificationCode(
   `).run(normalizedTarget);
 
   db.prepare(`
-    INSERT INTO verification_codes (id, target, channel, code, expires_at, attempts, created_at)
-    VALUES (?, ?, ?, ?, ?, 0, ?)
-  `).run(id, normalizedTarget, channel, code, expiresAt, nowISO);
+    INSERT INTO verification_codes (id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+  `).run(id, normalizedTarget, channel, code, codeHash, sessionId, expiresAt, nowISO);
 
-  // Development/demo log
-  console.log(`[Easyworks Auth] Verification OTP for ${normalizedTarget} (${channel}): ${code}`);
-
-  return { id, code, expiresAt };
+  return { id, code, expiresAt, signupSessionId: sessionId };
 }
 
 /**
  * Authoritatively verifies a 6-digit code against target.
+ * Enforces maximum 5 attempts, short expiry, single-use invalidation, and secure comparison.
  */
 export function verifyVerificationCode(
   target: string,
-  code: string
-): { success: boolean; error?: string } {
+  code: string,
+  signupSessionId?: string
+): { success: boolean; error?: string; code?: string; verificationRecord?: any } {
   const db = getDatabase();
   const normalizedEmailTarget = normalizeEmail(target);
   const normalizedPhoneTarget = normalizePhone(target);
 
-  const row = db.prepare(`
+  let query = `
     SELECT * FROM verification_codes
     WHERE (target = ? OR target = ?) AND verified_at IS NULL
-    ORDER BY created_at DESC LIMIT 1
-  `).get(normalizedEmailTarget, normalizedPhoneTarget) as any;
+  `;
+  const params: any[] = [normalizedEmailTarget, normalizedPhoneTarget];
+  if (signupSessionId) {
+    query += ' AND (signup_session_id = ? OR signup_session_id IS NULL)';
+    params.push(signupSessionId);
+  }
+  query += ' ORDER BY created_at DESC LIMIT 1';
+
+  const row = db.prepare(query).get(...params) as any;
 
   if (!row) {
-    return { success: false, error: 'No active verification code found. Please request a new code.' };
+    return { success: false, error: 'No active verification code found. Please request a new code.', code: 'INVALID_CODE' };
   }
 
   const now = new Date();
   if (new Date(row.expires_at).getTime() < now.getTime()) {
-    return { success: false, error: 'Verification code has expired. Please request a new code.' };
+    return { success: false, error: 'Verification code has expired. Please request a new code.', code: 'CODE_EXPIRED' };
   }
 
   if (row.attempts >= 5) {
-    return { success: false, error: 'Too many incorrect attempts. Please request a new code.' };
+    return { success: false, error: 'Too many incorrect attempts. Please request a new code.', code: 'MAX_ATTEMPTS_EXCEEDED' };
   }
 
-  if (row.code.trim() !== code.trim()) {
+  const targetForHash = row.channel === 'EMAIL' ? normalizedEmailTarget : normalizedPhoneTarget;
+  const computedHash = crypto.createHash('sha256').update(code.trim() + ':' + targetForHash).digest('hex');
+  const isMatch = (row.code_hash && row.code_hash === computedHash) || (row.code && row.code.trim() === code.trim());
+
+  if (!isMatch) {
     db.prepare(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
-    return { success: false, error: 'Invalid verification code. Please check and try again.' };
+    const remaining = 5 - (row.attempts + 1);
+    return {
+      success: false,
+      error: remaining > 0 ? `Invalid verification code. ${remaining} attempts remaining.` : 'Too many incorrect attempts. Please request a new code.',
+      code: remaining > 0 ? 'INVALID_CODE' : 'MAX_ATTEMPTS_EXCEEDED',
+    };
   }
 
-  // Success
+  // Success: invalidate code immediately so it cannot be reused
   db.prepare(`UPDATE verification_codes SET verified_at = ? WHERE id = ?`).run(now.toISOString(), row.id);
-  return { success: true };
+  return { success: true, verificationRecord: row };
 }
 
 /**
@@ -3112,7 +3280,10 @@ export function saveCustomerDocument(
   doc: any
 ): boolean {
   const db = getDatabase();
-  ensureUserExists(userId, undefined, doc?.ownerName, doc?.businessName);
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (!user) {
+    throw new Error('User not found: ' + userId);
+  }
   const nowISO = new Date().toISOString();
   const customerName = doc.customer?.name || doc.customerName || 'Direct Client';
   const grandTotal = doc.totals?.grandTotal || 0;

@@ -38,6 +38,7 @@ export default function AuthModal() {
   const [phone, setPhone] = useState('');
   const [phoneOtp, setPhoneOtp] = useState('');
   const [tempUserId, setTempUserId] = useState('');
+  const [signupSessionId, setSignupSessionId] = useState('');
 
   // Eligibility evaluation state
   const [eligibilityResult, setEligibilityResult] = useState<{
@@ -112,18 +113,25 @@ export default function AuthModal() {
     }
 
     setLoading(true);
-    const uId = 'usr_' + Date.now();
-    setTempUserId(uId);
 
     try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{
+        success?: boolean;
+        error?: string;
+        code?: string;
+        signupSessionId?: string;
+      }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: cleanEmail, channel: 'EMAIL', userId: uId }),
+        body: JSON.stringify({ target: cleanEmail, channel: 'EMAIL' }),
       });
 
       if (!ok) {
         throw new Error(data?.error || error || 'Failed to send email verification code.');
+      }
+
+      if (data?.signupSessionId) {
+        setSignupSessionId(data.signupSessionId);
       }
 
       setSignupStep('verify_email');
@@ -149,19 +157,31 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/verify-code', {
+      const { ok, data, error } = await safeFetchJson<{
+        success?: boolean;
+        error?: string;
+        code?: string;
+        user?: any;
+        subscription?: any;
+      }>('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target: email.trim(),
           code: emailOtp.trim(),
           channel: 'EMAIL',
-          userId: tempUserId,
+          signupSessionId,
+          name: name.trim(),
+          businessName: businessName.trim(),
         }),
       });
 
       if (!ok) {
         throw new Error(data?.error || error || 'Invalid verification code.');
+      }
+
+      if (data?.user?.id) {
+        setTempUserId(data.user.id);
       }
 
       setSignupStep('phone_entry');
@@ -187,10 +207,10 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; signupSessionId?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: cleanPhone, channel: 'SMS', userId: tempUserId }),
+        body: JSON.stringify({ target: cleanPhone, channel: 'SMS', signupSessionId }),
       });
 
       if (!ok) {
@@ -220,7 +240,7 @@ export default function AuthModal() {
 
     setLoading(true);
     try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; eligibility?: any }>('/api/auth/verify-code', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; eligibility?: any; user?: any }>('/api/auth/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -228,6 +248,7 @@ export default function AuthModal() {
           code: phoneOtp.trim(),
           channel: 'SMS',
           userId: tempUserId,
+          signupSessionId,
         }),
       });
 
@@ -272,12 +293,13 @@ export default function AuthModal() {
     setLoading(true);
     try {
       const target = channel === 'EMAIL' ? email.trim() : phone.trim();
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string }>('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; signupSessionId?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target, channel, userId: tempUserId }),
+        body: JSON.stringify({ target, channel, signupSessionId }),
       });
       if (!ok) throw new Error(data?.error || error || 'Failed to resend code');
+      if (data?.signupSessionId) setSignupSessionId(data.signupSessionId);
       startResendCountdown();
     } catch (err: any) {
       setError(err.message);

@@ -29,12 +29,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  let userId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
       return parsed.response;
     }
-    const { userId, planId, utrNumber, screenshotUrl, notes } = parsed.body || {};
+    const body = parsed.body || {};
+    userId = body.userId;
+    const { planId, utrNumber, screenshotUrl, notes } = body;
 
     if (!userId || !planId || !utrNumber) {
       return apiError('User ID, Plan ID, and Transaction ID / UTR number are required.', 400);
@@ -60,7 +63,13 @@ export async function POST(req: NextRequest) {
       subscription: updatedSubscription,
     });
   } catch (error: any) {
-    console.error('[POST /api/billing/manual-payment] Error:', error);
-    return apiError(error.message || 'Failed to submit payment request', 500);
+    if (error?.message && error.message.includes('User not found')) {
+      return apiError('User account not found.', 404, 'USER_NOT_FOUND');
+    }
+    return apiError(error, 500, 'INTERNAL_SERVER_ERROR', {
+      apiRoute: '/api/billing/manual-payment',
+      method: 'POST',
+      userId,
+    });
   }
 }

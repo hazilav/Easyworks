@@ -3,12 +3,15 @@ import { saveCustomerDocument, getCustomerDocuments } from '@/lib/db/database';
 import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
 
 export async function POST(req: NextRequest) {
+  let userId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
       return parsed.response;
     }
-    const { userId, type, document } = parsed.body || {};
+    const body = parsed.body || {};
+    userId = body.userId;
+    const { type, document } = body;
 
     if (!userId || !type || !document) {
       return apiError('userId, type, and document are required.', 400);
@@ -21,8 +24,14 @@ export async function POST(req: NextRequest) {
     saveCustomerDocument(userId, type, document);
     return apiSuccess({ message: 'Document saved successfully.' });
   } catch (error: any) {
-    console.error('[POST /api/documents] Error saving document:', error);
-    return apiError(error.message || 'Failed to save document.', 500);
+    if (error?.message && error.message.includes('User not found')) {
+      return apiError('User account not found.', 404, 'USER_NOT_FOUND');
+    }
+    return apiError(error, 500, 'INTERNAL_SERVER_ERROR', {
+      apiRoute: '/api/documents',
+      method: 'POST',
+      userId,
+    });
   }
 }
 
