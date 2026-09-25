@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getAllPlans, updatePlan } from '@/lib/db/database';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/billing/plans', async (req: NextRequest) => {
   try {
     const { searchParams } = new URL(req.url);
     const includeInactive = searchParams.get('all') === 'true';
@@ -27,9 +27,9 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/billing/plans] Error:', error);
     return apiError(error.message || 'Failed to fetch plans', 500);
   }
-}
+});
 
-export async function PATCH(req: NextRequest) {
+export const PATCH = withApiRouteHandler('PATCH /api/billing/plans', async (req: NextRequest) => {
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
@@ -70,4 +70,5 @@ export async function PATCH(req: NextRequest) {
     console.error('[PATCH /api/billing/plans] Error:', error);
     return apiError(error.message || 'Failed to update plan', 500);
   }
-}
+});
+

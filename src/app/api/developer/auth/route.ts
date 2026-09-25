@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   verifyDeveloperCredentials,
   verifyDeveloperSessionToken,
   getDatabase,
 } from '@/lib/db/database';
-import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/developer/auth', async (req: NextRequest) => {
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
@@ -31,9 +31,9 @@ export async function POST(req: NextRequest) {
     console.error('[POST /api/developer/auth] Error:', error);
     return apiError(error.message || 'Internal server error.', 500);
   }
-}
+});
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/developer/auth', async (req: NextRequest) => {
   try {
     const authHeader = req.headers.get('Authorization');
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
@@ -53,4 +53,5 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/developer/auth] Error:', error);
     return apiError(error.message || 'Authentication check failed', 500);
   }
-}
+});
+

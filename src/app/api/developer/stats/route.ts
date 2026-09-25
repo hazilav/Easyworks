@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getDeveloperStats, verifyDeveloperSessionToken } from '@/lib/db/database';
-import { apiSuccess, apiError, apiUnauthorized } from '@/lib/api/server';
+import { apiSuccess, apiError, apiUnauthorized, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/developer/stats', async (req: NextRequest) => {
   try {
     const authHeader = req.headers.get('Authorization');
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
@@ -17,4 +17,5 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/developer/stats] Error:', error);
     return apiError(error.message || 'Failed to fetch dashboard metrics.', 500);
   }
-}
+});
+

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   createVerificationCode,
   checkRateLimit,
@@ -6,9 +6,9 @@ import {
 } from '@/lib/db/database';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/auth/send-verification', async (req: NextRequest) => {
   let targetEmailOrPhone: string | undefined;
   try {
     const parsed = await safeReadBody(req);
@@ -79,4 +79,5 @@ export async function POST(req: NextRequest) {
       target: targetEmailOrPhone,
     });
   }
-}
+});
+

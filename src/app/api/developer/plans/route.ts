@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   getAllPlans,
   createPlan,
@@ -6,9 +6,9 @@ import {
   verifyDeveloperSessionToken,
   getDatabase,
 } from '@/lib/db/database';
-import { apiSuccess, apiError, apiUnauthorized, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, apiUnauthorized, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/developer/plans', async (req: NextRequest) => {
   try {
     const plans = getAllPlans(true);
     const db = getDatabase();
@@ -32,9 +32,9 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/developer/plans] Error:', error);
     return apiError(error.message || 'Failed to fetch plans.', 500);
   }
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/developer/plans', async (req: NextRequest) => {
   try {
     const authHeader = req.headers.get('Authorization');
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
@@ -65,4 +65,5 @@ export async function POST(req: NextRequest) {
     console.error('[POST /api/developer/plans] Error in plan operation:', error);
     return apiError(error.message || 'Failed to update plan.', 500);
   }
-}
+});
+

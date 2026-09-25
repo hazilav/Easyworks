@@ -39,12 +39,30 @@ export function logApiError(params: LogApiErrorParams): void {
 }
 
 /**
+ * Generate server-side Request ID formatted as EW-XXXXXX
+ */
+export function generateServerRequestId(): string {
+  const chars = '0123456789ABCDEF';
+  let rand = '';
+  for (let i = 0; i < 6; i++) {
+    rand += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `EW-${rand}`;
+}
+
+/**
  * Standard successful JSON response
  */
-export function apiSuccess<T extends Record<string, any>>(data: T, status = 200): NextResponse {
+export function apiSuccess<T extends Record<string, any>>(
+  data: T,
+  status = 200,
+  extraHeaders?: Record<string, string>
+): NextResponse {
+  const requestId = data?.requestId || extraHeaders?.['x-request-id'] || generateServerRequestId();
   return NextResponse.json(
     {
       success: true,
+      requestId,
       ...data,
     },
     {
@@ -52,6 +70,8 @@ export function apiSuccess<T extends Record<string, any>>(data: T, status = 200)
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store, max-age=0',
+        'X-Request-Id': requestId,
+        ...(extraHeaders || {}),
       },
     }
   );
@@ -68,7 +88,10 @@ export function apiError(
   code?: string,
   extra?: Record<string, any>
 ): NextResponse {
-  const requestId = extra?.requestId || 'req_' + crypto.randomBytes(4).toString('hex');
+  let requestId = extra?.requestId;
+  if (!requestId || typeof requestId !== 'string' || !requestId.startsWith('EW-')) {
+    requestId = generateServerRequestId();
+  }
   const errorCode = code || (status >= 500 ? 'INTERNAL_SERVER_ERROR' : status === 400 ? 'BAD_REQUEST' : status === 404 ? 'NOT_FOUND' : undefined);
 
   const rawMessage = typeof error === 'string' ? error : error?.message || String(error || 'An unexpected error occurred.');
@@ -85,6 +108,17 @@ export function apiError(
       errorMessage: cleanMessage,
       stackTrace,
     });
+
+    // Also persist in activity_logs asynchronously so Developer Panel can view it
+    try {
+      const { logActivity } = require('@/lib/db/database');
+      logActivity(
+        'API_ERROR',
+        `[${requestId}] ${extra?.method || 'REQ'} ${extra?.apiRoute || 'API'} - ${cleanMessage.slice(0, 200)}`,
+        'system',
+        extra?.userId
+      );
+    } catch {}
   }
 
   const safeExtra = { ...extra };
@@ -109,6 +143,7 @@ export function apiError(
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store, max-age=0',
+        'X-Request-Id': requestId,
       },
     });
   } catch (serializeErr) {
@@ -125,6 +160,7 @@ export function apiError(
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'no-store, max-age=0',
+          'X-Request-Id': requestId,
         },
       }
     );
@@ -168,7 +204,7 @@ export async function safeReadBody<T = any>(
 
 export type ApiRouteHandler = (
   req: NextRequest,
-  context?: { params?: Record<string, string | string[]> }
+  context?: any
 ) => Promise<Response | NextResponse> | Response | NextResponse;
 
 /**
@@ -176,16 +212,20 @@ export type ApiRouteHandler = (
  * 1. Global try/catch interceptor
  * 2. Guaranteed non-empty JSON error responses (HTTP 500)
  * 3. Structured server-side error logging with sanitized payloads
- * 4. Automatic Request ID assignment
+ * 4. Automatic Request ID assignment (EW-XXXXXX)
  */
 export function withApiRouteHandler(
   routeLabel: string,
   handler: ApiRouteHandler
-): ApiRouteHandler {
-  return async (req: NextRequest, context?: { params?: Record<string, string | string[]> }) => {
-    const requestId = 'req_' + crypto.randomBytes(4).toString('hex');
+): (req: NextRequest, context?: any) => Promise<Response | NextResponse> {
+  return async (req: NextRequest, context?: any) => {
+    const incomingId = req.headers.get('x-request-id');
+    const requestId = incomingId && incomingId.startsWith('EW-') ? incomingId : generateServerRequestId();
     try {
       const res = await handler(req, context);
+      if (res && res.headers && !res.headers.get('x-request-id')) {
+        res.headers.set('X-Request-Id', requestId);
+      }
       return res;
     } catch (err: any) {
       const message = err?.message || String(err) || 'Internal Server Error';

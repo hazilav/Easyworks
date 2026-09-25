@@ -22,26 +22,98 @@ import { addCalendarMonths, evaluateSubscriptionStatus } from '../billing/dateUt
 import { normalizeEmail, normalizePhone, normalizeBusinessName, extractDomain } from '../abuse/normalizers';
 import { isDisposableEmail } from '../abuse/disposableEmails';
 
-// Ensure data directory exists
-const DATA_DIR = path.join(process.cwd(), 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
+/**
+ * Safe database file path resolver
+ * Gracefully handles serverless read-only filesystems (e.g. Vercel, AWS Lambda)
+ * and custom EASYWORKS_DB_PATH overrides.
+ */
+export function getDatabaseFilePath(): string {
+  if (process.env.EASYWORKS_DB_PATH) {
+    return process.env.EASYWORKS_DB_PATH;
+  }
 
-const DB_PATH = path.join(DATA_DIR, 'easyworks.db');
+  const isServerless = Boolean(
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.NOW_REGION
+  );
+
+  if (isServerless) {
+    const tmpDir = path.join('/tmp', 'easyworks-data');
+    try {
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      return path.join(tmpDir, 'easyworks.db');
+    } catch (e) {
+      console.warn('[Database] Failed to create /tmp/easyworks-data directory:', e);
+      return path.join('/tmp', 'easyworks.db');
+    }
+  }
+
+  const dataDir = path.join(process.cwd(), 'data');
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    return path.join(dataDir, 'easyworks.db');
+  } catch (err) {
+    console.warn('[Database] Read-only or unwritable data directory, falling back to /tmp:', err);
+    const tmpDir = path.join('/tmp', 'easyworks-data');
+    try {
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+    } catch {}
+    return path.join(tmpDir, 'easyworks.db');
+  }
+}
 
 // Singleton database instance
 let dbInstance: DatabaseSync | null = null;
 
 export function getDatabase(): DatabaseSync {
   if (!dbInstance) {
-    dbInstance = new DatabaseSync(DB_PATH);
-    // Enable foreign keys & WAL mode for performance
-    dbInstance.exec('PRAGMA foreign_keys = ON;');
-    dbInstance.exec('PRAGMA journal_mode = WAL;');
-    initDatabase(dbInstance);
+    const dbPath = getDatabaseFilePath();
+    try {
+      dbInstance = new DatabaseSync(dbPath);
+      // Enable foreign keys
+      dbInstance.exec('PRAGMA foreign_keys = ON;');
+      // Try WAL mode, fallback silently if unsupported
+      try {
+        dbInstance.exec('PRAGMA journal_mode = WAL;');
+      } catch (walErr) {
+        console.warn('[Database] WAL mode unsupported, falling back to default journal mode:', walErr);
+      }
+      initDatabase(dbInstance);
+      console.log(`[Database] SQLite connected at: ${path.basename(dbPath)}`);
+    } catch (dbErr: any) {
+      console.error(`[Database] Critical failure initializing SQLite database at ${dbPath}:`, dbErr);
+      throw new Error(`Database connection failed: ${dbErr?.message || 'SQLite initialization error'}`);
+    }
   }
   return dbInstance;
+}
+
+export function getDatabaseDiagnostics(): {
+  status: 'connected' | 'error';
+  databaseName: string;
+  error?: string;
+} {
+  try {
+    const db = getDatabase();
+    db.prepare('SELECT 1 as ping').get();
+    return {
+      status: 'connected',
+      databaseName: path.basename(getDatabaseFilePath()),
+    };
+  } catch (err: any) {
+    return {
+      status: 'error',
+      databaseName: 'easyworks.db',
+      error: err?.message || 'Database unavailable',
+    };
+  }
 }
 
 export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {

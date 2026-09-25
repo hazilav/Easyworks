@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   verifyVerificationCode,
   checkRateLimit,
@@ -9,9 +9,9 @@ import {
   getUserById,
 } from '@/lib/db/database';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req: NextRequest) => {
   let verifiedUserId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
@@ -104,4 +104,5 @@ export async function POST(req: NextRequest) {
       userId: verifiedUserId,
     });
   }
-}
+});
+

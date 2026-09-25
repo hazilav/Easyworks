@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   createManualPaymentRequest,
   getUserManualPayments,
   getUserSubscription,
 } from '@/lib/db/database';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/billing/manual-payment', async (req: NextRequest) => {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
@@ -26,9 +26,9 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/billing/manual-payment] Error:', error);
     return apiError(error.message || 'Failed to fetch manual payments', 500);
   }
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/billing/manual-payment', async (req: NextRequest) => {
   let userId: string | undefined;
   try {
     const parsed = await safeReadBody(req);
@@ -72,4 +72,5 @@ export async function POST(req: NextRequest) {
       userId,
     });
   }
-}
+});
+

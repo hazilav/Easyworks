@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAndConsumeTrialPdfDownload, getUserSubscription } from '@/lib/db/database';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/billing/pdf-download', async (req: NextRequest) => {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
@@ -31,9 +31,9 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/billing/pdf-download] Error:', err);
     return apiError(err.message || 'Failed to check PDF limit', 500);
   }
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/billing/pdf-download', async (req: NextRequest) => {
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
@@ -107,4 +107,5 @@ export async function POST(req: NextRequest) {
     console.error('[POST /api/billing/pdf-download] Error:', err);
     return apiError(err.message || 'Internal server error during verification', 500);
   }
-}
+});
+

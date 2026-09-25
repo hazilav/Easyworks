@@ -1,13 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import {
   ensureUserAndTrial,
   getUserSubscription,
   getUserPayments,
   getTrialIdentityByUserId,
 } from '@/lib/db/database';
-import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 
-export async function GET(req: NextRequest) {
+export const GET = withApiRouteHandler('GET /api/billing/subscription', async (req: NextRequest) => {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
@@ -32,9 +32,9 @@ export async function GET(req: NextRequest) {
     console.error('[GET /api/billing/subscription] Error:', error);
     return apiError(error.message || 'Unable to load subscription data', 500);
   }
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApiRouteHandler('POST /api/billing/subscription', async (req: NextRequest) => {
   try {
     const parsed = await safeReadBody(req);
     if (!parsed.success) {
@@ -60,4 +60,5 @@ export async function POST(req: NextRequest) {
     console.error('[POST /api/billing/subscription] Error:', error);
     return apiError(error.message || 'Failed to sync subscription data', 500);
   }
-}
+});
+
