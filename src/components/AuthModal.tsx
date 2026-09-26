@@ -118,6 +118,7 @@ export default function AuthModal() {
       const { ok, data, error } = await safeFetchJson<{
         success?: boolean;
         error?: string;
+        message?: string;
         code?: string;
         signupSessionId?: string;
       }>('/api/auth/send-verification', {
@@ -127,7 +128,7 @@ export default function AuthModal() {
       });
 
       if (!ok) {
-        throw new Error(data?.error || error || 'Failed to send email verification code.');
+        throw new Error(data?.message || data?.error || error || 'Failed to send email verification code.');
       }
 
       if (data?.signupSessionId) {
@@ -293,12 +294,12 @@ export default function AuthModal() {
     setLoading(true);
     try {
       const target = channel === 'EMAIL' ? email.trim() : phone.trim();
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; signupSessionId?: string }>('/api/auth/send-verification', {
+      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; message?: string; signupSessionId?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target, channel, signupSessionId }),
       });
-      if (!ok) throw new Error(data?.error || error || 'Failed to resend code');
+      if (!ok) throw new Error(data?.message || data?.error || error || 'Failed to resend code');
       if (data?.signupSessionId) setSignupSessionId(data.signupSessionId);
       startResendCountdown();
     } catch (err: any) {

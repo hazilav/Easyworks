@@ -252,6 +252,20 @@ function initDatabase(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS email_settings (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL DEFAULT 'smtp',
+      smtp_host TEXT,
+      smtp_port INTEGER DEFAULT 587,
+      smtp_user TEXT,
+      smtp_pass TEXT,
+      smtp_secure INTEGER DEFAULT 0,
+      sender_email TEXT,
+      sender_name TEXT DEFAULT 'Easyworks',
+      is_active INTEGER DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS manual_payment_requests (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1809,6 +1823,117 @@ export function updatePaymentSettings(settings: Partial<PaymentSettings>): Payme
   return getPaymentSettings();
 }
 
+export interface EmailSettingsRecord {
+  id: string;
+  provider: 'smtp' | 'resend' | 'sendgrid';
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass?: string;
+  smtpSecure: boolean;
+  senderEmail: string;
+  senderName: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export function getEmailSettings(): EmailSettingsRecord {
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
+  if (!row) {
+    return {
+      id: 'default',
+      provider: 'smtp',
+      smtpHost: process.env.SMTP_HOST || '',
+      smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
+      smtpUser: process.env.SMTP_USER || process.env.SMTP_USERNAME || '',
+      smtpPass: process.env.SMTP_PASS || process.env.SMTP_PASSWORD ? '••••••••' : '',
+      smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+      senderEmail: process.env.EMAIL_FROM || process.env.SENDER_EMAIL || '',
+      senderName: process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks',
+      isActive: true,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return {
+    id: row.id,
+    provider: row.provider || 'smtp',
+    smtpHost: row.smtp_host || '',
+    smtpPort: row.smtp_port || 587,
+    smtpUser: row.smtp_user || '',
+    smtpPass: row.smtp_pass ? '••••••••' : '',
+    smtpSecure: Boolean(row.smtp_secure),
+    senderEmail: row.sender_email || '',
+    senderName: row.sender_name || 'Easyworks',
+    isActive: Boolean(row.is_active),
+    updatedAt: row.updated_at,
+  };
+}
+
+export function getRawEmailSettings(): (EmailSettingsRecord & { rawPassword?: string }) | null {
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
+  if (row && row.is_active && row.smtp_host && row.smtp_user) {
+    return {
+      id: row.id,
+      provider: row.provider || 'smtp',
+      smtpHost: row.smtp_host || '',
+      smtpPort: row.smtp_port || 587,
+      smtpUser: row.smtp_user || '',
+      smtpPass: row.smtp_pass || '',
+      rawPassword: row.smtp_pass || '',
+      smtpSecure: Boolean(row.smtp_secure),
+      senderEmail: row.sender_email || '',
+      senderName: row.sender_name || 'Easyworks',
+      isActive: Boolean(row.is_active),
+      updatedAt: row.updated_at,
+    };
+  }
+  return null;
+}
+
+export function updateEmailSettings(settings: Partial<EmailSettingsRecord>): EmailSettingsRecord {
+  const db = getDatabase();
+  const existing = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
+  const now = new Date().toISOString();
+
+  // If password provided as mask or empty, keep existing password
+  const newPass = settings.smtpPass && !settings.smtpPass.includes('••••')
+    ? settings.smtpPass
+    : (existing ? existing.smtp_pass : (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || ''));
+
+  db.prepare(`
+    INSERT INTO email_settings (
+      id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
+      sender_email, sender_name, is_active, updated_at
+    ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      provider = excluded.provider,
+      smtp_host = excluded.smtp_host,
+      smtp_port = excluded.smtp_port,
+      smtp_user = excluded.smtp_user,
+      smtp_pass = excluded.smtp_pass,
+      smtp_secure = excluded.smtp_secure,
+      sender_email = excluded.sender_email,
+      sender_name = excluded.sender_name,
+      is_active = excluded.is_active,
+      updated_at = excluded.updated_at
+  `).run(
+    settings.provider || existing?.provider || 'smtp',
+    settings.smtpHost !== undefined ? settings.smtpHost.trim() : (existing?.smtp_host || ''),
+    settings.smtpPort !== undefined ? Number(settings.smtpPort) : (existing?.smtp_port || 587),
+    settings.smtpUser !== undefined ? settings.smtpUser.trim() : (existing?.smtp_user || ''),
+    newPass,
+    settings.smtpSecure !== undefined ? (settings.smtpSecure ? 1 : 0) : (existing?.smtp_secure || 0),
+    settings.senderEmail !== undefined ? settings.senderEmail.trim() : (existing?.sender_email || ''),
+    settings.senderName !== undefined ? settings.senderName.trim() : (existing?.sender_name || 'Easyworks'),
+    settings.isActive !== undefined ? (settings.isActive ? 1 : 0) : (existing?.is_active ?? 1),
+    now
+  );
+
+  return getEmailSettings();
+}
+
 export function createManualPaymentRequest({
   userId,
   planId,
@@ -2183,6 +2308,7 @@ export function createOrUpdateTrialIdentity(data: {
 
 /**
  * Creates a secure 6-digit numeric verification code (10-minute expiry) with SHA-256 hash storage.
+ * Plaintext OTP is NEVER stored in the database. Only the SHA-256 hash is persisted.
  */
 export function createVerificationCode(
   target: string,
@@ -2192,8 +2318,8 @@ export function createVerificationCode(
   const db = getDatabase();
   const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
 
-  // Generate 6-digit numeric code
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  // Generate cryptographically secure 6-digit numeric code
+  const code = String(crypto.randomInt(100000, 1000000));
   const id = 'vc_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
@@ -2208,10 +2334,11 @@ export function createVerificationCode(
     DELETE FROM verification_codes WHERE target = ? AND verified_at IS NULL
   `).run(normalizedTarget);
 
+  // Store ONLY the hashed OTP in the database (never the plaintext OTP)
   db.prepare(`
     INSERT INTO verification_codes (id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-  `).run(id, normalizedTarget, channel, code, codeHash, sessionId, expiresAt, nowISO);
+  `).run(id, normalizedTarget, channel, '[HASHED]', codeHash, sessionId, expiresAt, nowISO);
 
   return { id, code, expiresAt, signupSessionId: sessionId };
 }
@@ -2257,14 +2384,14 @@ export function verifyVerificationCode(
 
   const targetForHash = row.channel === 'EMAIL' ? normalizedEmailTarget : normalizedPhoneTarget;
   const computedHash = crypto.createHash('sha256').update(code.trim() + ':' + targetForHash).digest('hex');
-  const isMatch = (row.code_hash && row.code_hash === computedHash) || (row.code && row.code.trim() === code.trim());
+  const isMatch = Boolean(row.code_hash && row.code_hash === computedHash);
 
   if (!isMatch) {
     db.prepare(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
     const remaining = 5 - (row.attempts + 1);
     return {
       success: false,
-      error: remaining > 0 ? `Invalid verification code. ${remaining} attempts remaining.` : 'Too many incorrect attempts. Please request a new code.',
+      error: remaining > 0 ? `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` : 'Too many incorrect attempts. Please request a new code.',
       code: remaining > 0 ? 'INVALID_CODE' : 'MAX_ATTEMPTS_EXCEEDED',
     };
   }

@@ -12,6 +12,7 @@ import DeveloperAuditView from '@/components/developer/DeveloperAuditView';
 import DeveloperBusinessesView from '@/components/developer/DeveloperBusinessesView';
 import DeveloperDocumentsView from '@/components/developer/DeveloperDocumentsView';
 import DeveloperTemplatesView from '@/components/developer/DeveloperTemplatesView';
+import DeveloperSettingsView from '@/components/developer/DeveloperSettingsView';
 import { DeveloperStats, SubscriptionPlan } from '@/types';
 import { Menu } from 'lucide-react';
 import { safeFetchJson } from '@/lib/api/client';
@@ -275,9 +276,7 @@ export default function DeveloperPage() {
         )}
 
         {currentTab === 'settings' && (
-          <DeveloperPaymentsView
-            onRefreshStats={loadStats}
-          />
+          <DeveloperSettingsView />
         )}
       </main>
     </div>
