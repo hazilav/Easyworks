@@ -9,7 +9,7 @@ interface DeveloperLoginViewProps {
 }
 
 export default function DeveloperLoginView({ onLoginSuccess }: DeveloperLoginViewProps) {
-  const [email, setEmail] = useState('muhammedhazilav@gmail.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +94,8 @@ export default function DeveloperLoginView({ onLoginSuccess }: DeveloperLoginVie
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="developer@easyworks.com"
+                  placeholder="Enter administrative email"
+                  autoComplete="username"
                   className="w-full h-10 pl-10 pr-3.5 bg-[#0e131f] border border-zinc-700/60 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-hidden focus:border-blue-500 transition-colors"
                 />
               </div>
@@ -114,7 +115,8 @@ export default function DeveloperLoginView({ onLoginSuccess }: DeveloperLoginVie
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
+                  placeholder="Enter master password"
+                  autoComplete="current-password"
                   className="w-full h-10 pl-10 pr-3.5 bg-[#0e131f] border border-zinc-700/60 rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-hidden focus:border-blue-500 transition-colors"
                 />
               </div>
@@ -138,13 +140,13 @@ export default function DeveloperLoginView({ onLoginSuccess }: DeveloperLoginVie
 
           {/* Quick Info */}
           <div className="mt-6 pt-5 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-400">
-            <div className="flex items-center gap-1.5">
-              <Phone className="w-3.5 h-3.5 text-emerald-400" />
-              <span>WhatsApp: 9539933265</span>
-            </div>
+            <span className="text-zinc-500 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+              <span>Restricted Access</span>
+            </span>
             <a
               href="/"
-              className="text-blue-400 hover:underline flex items-center gap-1"
+              className="text-blue-400 hover:underline flex items-center gap-1 font-medium"
             >
               <span>Customer App</span>
               <ArrowRight className="w-3 h-3" />

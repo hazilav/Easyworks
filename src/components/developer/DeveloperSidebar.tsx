@@ -131,10 +131,10 @@ export default function DeveloperSidebar({
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-white truncate">
-                {developerUser?.name || 'Muhammed Hazil'}
+                {developerUser?.name || 'Super Admin'}
               </p>
               <p className="text-[10px] text-zinc-400 truncate font-mono">
-                {developerUser?.email || 'muhammedhazilav@gmail.com'}
+                {developerUser?.email || 'admin@easyworks.internal'}
               </p>
             </div>
           </div>
@@ -197,8 +197,11 @@ export default function DeveloperSidebar({
       {/* Footer / Logout */}
       <div className="p-3 border-t border-zinc-800/80 space-y-2">
         <div className="px-3 py-1 flex items-center justify-between text-[11px] text-zinc-500">
-          <span>WhatsApp Hotline</span>
-          <span className="text-zinc-400 font-mono">9539933265</span>
+          <span>Security</span>
+          <span className="text-emerald-400 font-mono flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Verified
+          </span>
         </div>
 
         <button

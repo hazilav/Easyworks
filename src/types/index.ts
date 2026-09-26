@@ -35,6 +35,7 @@ export interface BusinessProfile {
     paymentInstructions?: string;
   };
   logoUrl?: string;
+  logoEnabled?: boolean;
 }
 
 export interface Customer {
@@ -114,6 +115,7 @@ export interface Quotation {
     website?: string;
     taxNumber?: string;
     logoUrl?: string;
+    logoEnabled?: boolean;
   };
   customer: {
     id?: string;
@@ -151,6 +153,7 @@ export interface Invoice {
     website?: string;
     taxNumber?: string;
     logoUrl?: string;
+    logoEnabled?: boolean;
   };
   customer: {
     id?: string;

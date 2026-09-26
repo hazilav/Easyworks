@@ -178,6 +178,26 @@ export function apiUnauthorized(
 }
 
 /**
+ * Standard 400 Bad Request response
+ */
+export function apiBadRequest(
+  message = 'Bad request',
+  code = 'BAD_REQUEST'
+): NextResponse {
+  return apiError(message, 400, code);
+}
+
+/**
+ * Standard 404 Not Found response
+ */
+export function apiNotFound(
+  message = 'Resource not found',
+  code = 'NOT_FOUND'
+): NextResponse {
+  return apiError(message, 404, code);
+}
+
+/**
  * Safely parse JSON request body from NextRequest.
  * Will NEVER throw "Unexpected end of JSON input".
  * If body is empty or whitespace, resolves to `{ success: true, body: {} }`.

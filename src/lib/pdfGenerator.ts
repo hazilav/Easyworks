@@ -57,6 +57,50 @@ export function registerMontserrat(doc: jsPDF): string {
   }
 }
 
+/**
+ * Safely renders the business logo if provided and enabled.
+ * Preserves aspect ratio with max bounds: maxWidthMm (default 36mm) and maxHeightMm (default 16mm).
+ */
+export function renderBusinessLogo(
+  doc: jsPDF,
+  logoUrl?: string,
+  logoEnabled?: boolean,
+  x = 14,
+  y = 14,
+  maxWidthMm = 36,
+  maxHeightMm = 16
+): { rendered: boolean; width: number; height: number } {
+  if (!logoUrl || !logoUrl.trim() || logoEnabled === false) {
+    return { rendered: false, width: 0, height: 0 };
+  }
+  try {
+    let width = maxWidthMm;
+    let height = maxHeightMm;
+
+    try {
+      const props = doc.getImageProperties(logoUrl);
+      if (props && props.width && props.height) {
+        const aspect = props.width / props.height;
+        if (aspect > maxWidthMm / maxHeightMm) {
+          width = maxWidthMm;
+          height = maxWidthMm / aspect;
+        } else {
+          height = maxHeightMm;
+          width = maxHeightMm * aspect;
+        }
+      }
+    } catch {
+      // Fallback if image dimensions cannot be parsed directly
+    }
+
+    doc.addImage(logoUrl, x, y, width, height);
+    return { rendered: true, width, height };
+  } catch (err) {
+    console.warn('[pdfGenerator] Failed to render business logo:', err);
+    return { rendered: false, width: 0, height: 0 };
+  }
+}
+
 export function generateQuotationPDF(quotation: Quotation, businessOverride?: BusinessProfile): jsPDF {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -83,11 +127,14 @@ export function generateQuotationPDF(quotation: Quotation, businessOverride?: Bu
 
   // Header
   if (style === 'modern') {
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 35, 16);
+    const titleX = logo.rendered ? margin + logo.width + 4 : margin;
+
     // Business Branding
     doc.setFont(fontName, 'bold');
     doc.setFontSize(20);
     doc.setTextColor(theme.dark[0], theme.dark[1], theme.dark[2]);
-    doc.text(business.businessName || 'EASYWORKS', margin, currentY + 5);
+    doc.text(business.businessName || 'EASYWORKS', titleX, currentY + 5);
 
     // Document Badge
     doc.setFont(fontName, 'bold');
@@ -106,7 +153,18 @@ export function generateQuotationPDF(quotation: Quotation, businessOverride?: Bu
     doc.text(`Issue Date: ${quotation.date}`, pageWidth - margin, currentY + 15, { align: 'right' });
     doc.text(`Valid Until: ${quotation.validUntil}`, pageWidth - margin, currentY + 19, { align: 'right' });
 
+    if (logo.rendered) {
+      currentY = Math.max(currentY + 15, currentY + logo.height + 2);
+    } else {
+      currentY += 15;
+    }
+
   } else if (style === 'classic') {
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 35, 14);
+    if (logo.rendered) {
+      currentY += logo.height + 3;
+    }
+
     doc.setFillColor(theme.primary[0], theme.primary[1], theme.primary[2]);
     doc.rect(margin, currentY, pageWidth - (margin * 2), 14, 'F');
 
@@ -130,10 +188,13 @@ export function generateQuotationPDF(quotation: Quotation, businessOverride?: Bu
 
   } else {
     // Minimalist
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 28, 12);
+    const titleX = logo.rendered ? margin + logo.width + 4 : margin;
+
     doc.setFont(fontName, 'bold');
     doc.setFontSize(16);
     doc.setTextColor(theme.dark[0], theme.dark[1], theme.dark[2]);
-    doc.text(business.businessName || 'EASYWORKS', margin, currentY + 4);
+    doc.text(business.businessName || 'EASYWORKS', titleX, currentY + 4);
 
     doc.setFont(fontName, 'normal');
     doc.setFontSize(9);
@@ -149,12 +210,15 @@ export function generateQuotationPDF(quotation: Quotation, businessOverride?: Bu
     doc.setFontSize(8);
     doc.setTextColor(theme.textMuted[0], theme.textMuted[1], theme.textMuted[2]);
     doc.text(`${quotation.date} · valid till ${quotation.validUntil}`, pageWidth - margin, currentY + 12, { align: 'right' });
+
+    if (logo.rendered) {
+      currentY = Math.max(currentY + 15, currentY + logo.height + 2);
+    } else {
+      currentY += 15;
+    }
   }
 
   // Company Details Block
-  if (style !== 'classic') {
-    currentY += 15;
-  }
   doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
@@ -413,10 +477,13 @@ export function generateInvoicePDF(invoice: Invoice, businessOverride?: Business
 
   // Render Header
   if (style === 'modern') {
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 35, 16);
+    const titleX = logo.rendered ? margin + logo.width + 4 : margin;
+
     doc.setFont(fontName, 'bold');
     doc.setFontSize(20);
     doc.setTextColor(theme.dark[0], theme.dark[1], theme.dark[2]);
-    doc.text(business.businessName || 'EASYWORKS', margin, currentY + 5);
+    doc.text(business.businessName || 'EASYWORKS', titleX, currentY + 5);
 
     doc.setFont(fontName, 'bold');
     doc.setFontSize(16);
@@ -434,7 +501,18 @@ export function generateInvoicePDF(invoice: Invoice, businessOverride?: Business
     doc.text(`Invoice Date: ${invoice.date}`, pageWidth - margin, currentY + 15, { align: 'right' });
     doc.text(`Due Date: ${invoice.dueDate}`, pageWidth - margin, currentY + 19, { align: 'right' });
 
+    if (logo.rendered) {
+      currentY = Math.max(currentY + 15, currentY + logo.height + 2);
+    } else {
+      currentY += 15;
+    }
+
   } else if (style === 'classic') {
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 35, 14);
+    if (logo.rendered) {
+      currentY += logo.height + 3;
+    }
+
     doc.setFillColor(theme.primary[0], theme.primary[1], theme.primary[2]);
     doc.rect(margin, currentY, pageWidth - (margin * 2), 14, 'F');
 
@@ -458,10 +536,13 @@ export function generateInvoicePDF(invoice: Invoice, businessOverride?: Business
 
   } else {
     // Minimalist
+    const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, currentY, 28, 12);
+    const titleX = logo.rendered ? margin + logo.width + 4 : margin;
+
     doc.setFont(fontName, 'bold');
     doc.setFontSize(16);
     doc.setTextColor(theme.dark[0], theme.dark[1], theme.dark[2]);
-    doc.text(business.businessName || 'EASYWORKS', margin, currentY + 4);
+    doc.text(business.businessName || 'EASYWORKS', titleX, currentY + 4);
 
     doc.setFont(fontName, 'normal');
     doc.setFontSize(9);
@@ -477,12 +558,15 @@ export function generateInvoicePDF(invoice: Invoice, businessOverride?: Business
     doc.setFontSize(8);
     doc.setTextColor(theme.textMuted[0], theme.textMuted[1], theme.textMuted[2]);
     doc.text(`${invoice.date} · due ${invoice.dueDate}`, pageWidth - margin, currentY + 12, { align: 'right' });
+
+    if (logo.rendered) {
+      currentY = Math.max(currentY + 15, currentY + logo.height + 2);
+    } else {
+      currentY += 15;
+    }
   }
 
   // Company Details Block
-  if (style !== 'classic') {
-    currentY += 15;
-  }
   doc.setFont(fontName, 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);

@@ -452,7 +452,7 @@ Branch: ${paymentSettings.bankBranch}`;
                   <div className="space-y-3">
                     {/* UTR Input */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-black mb-1">
                         Transaction ID / UTR Number <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -461,17 +461,17 @@ Branch: ${paymentSettings.bankBranch}`;
                         value={utrNumber}
                         onChange={(e) => setUtrNumber(e.target.value)}
                         placeholder="e.g. 423984712948 or UPI Ref No."
-                        className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white text-black placeholder:text-slate-400"
                       />
                     </div>
 
                     {/* Screenshot Upload */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-black mb-1">
                         Payment Screenshot (Optional but recommended)
                       </label>
                       <div className="flex items-center gap-3">
-                        <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition-colors">
+                        <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-black text-xs font-semibold rounded-lg border border-slate-300 transition-colors">
                           <Upload className="w-3.5 h-3.5 text-slate-500" />
                           <span>Choose Screenshot</span>
                           <input
@@ -482,7 +482,7 @@ Branch: ${paymentSettings.bankBranch}`;
                           />
                         </label>
                         {screenshotFileName && (
-                          <span className="text-xs text-slate-600 truncate max-w-xs font-mono">
+                          <span className="text-xs text-black truncate max-w-xs font-mono">
                             {screenshotFileName}
                           </span>
                         )}
@@ -510,7 +510,7 @@ Branch: ${paymentSettings.bankBranch}`;
 
                     {/* Notes */}
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      <label className="block text-xs font-semibold text-black mb-1">
                         Notes / Remarks (Optional)
                       </label>
                       <input
@@ -518,7 +518,7 @@ Branch: ${paymentSettings.bankBranch}`;
                         value={notes}
                         onChange={(e) => setNotes(e.target.value)}
                         placeholder="Any additional details (e.g. sender bank or name)"
-                        className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white text-black placeholder:text-slate-400"
                       />
                     </div>
                   </div>

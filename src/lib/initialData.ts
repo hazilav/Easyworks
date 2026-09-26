@@ -24,6 +24,7 @@ export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
     upiId: 'easyworks@hdfcbank',
   },
   logoUrl: '',
+  logoEnabled: true,
 };
 
 export const INITIAL_CATALOG_ITEMS: CatalogItem[] = [
@@ -154,6 +155,7 @@ export function createBlankQuotation(business: BusinessProfile = DEFAULT_BUSINES
       website: business.website,
       taxNumber: business.taxNumber,
       logoUrl: business.logoUrl,
+      logoEnabled: business.logoEnabled ?? true,
     },
     customer: {
       name: '',
@@ -248,6 +250,7 @@ export function createBlankInvoice(
       website: business.website,
       taxNumber: business.taxNumber,
       logoUrl: business.logoUrl,
+      logoEnabled: business.logoEnabled ?? true,
     },
     customer: {
       name: '',

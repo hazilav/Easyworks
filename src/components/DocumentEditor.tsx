@@ -1421,22 +1421,31 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
           >
               {/* Modern Header */}
               {docData.template === 'modern' && (
-                <div className="flex justify-between items-start border-b border-slate-200 pb-4">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                      {docData.business.businessName || 'Business Name'}
-                    </h2>
-                    <p className="text-xs text-slate-500 font-normal mt-1">{docData.business.address}</p>
-                    <p className="text-xs text-slate-500 font-normal">
-                      {docData.business.phone} • {docData.business.email}
-                    </p>
-                    {docData.business.taxNumber && (
-                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                        GST/Tax: {docData.business.taxNumber}
-                      </p>
+                <div className="flex justify-between items-start border-b border-slate-200 pb-4 gap-4">
+                  <div className="flex items-start gap-4">
+                    {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
+                      <img
+                        src={docData.business.logoUrl}
+                        alt={docData.business.businessName || 'Business Logo'}
+                        className="max-h-[70px] max-w-[160px] object-contain shrink-0 rounded"
+                      />
                     )}
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+                        {docData.business.businessName || 'Business Name'}
+                      </h2>
+                      <p className="text-xs text-slate-500 font-normal mt-1">{docData.business.address}</p>
+                      <p className="text-xs text-slate-500 font-normal">
+                        {docData.business.phone} • {docData.business.email}
+                      </p>
+                      {docData.business.taxNumber && (
+                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                          GST/Tax: {docData.business.taxNumber}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <span
                       className={`text-xs font-bold uppercase px-3 py-1 rounded-full whitespace-nowrap ${
                         isQuotation
@@ -1459,7 +1468,16 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
 
               {/* Classic Corporate Header */}
               {docData.template === 'classic' && (
-                <div className="space-y-4">
+                <div className="space-y-3">
+                  {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
+                    <div className="flex items-center justify-between pb-1">
+                      <img
+                        src={docData.business.logoUrl}
+                        alt={docData.business.businessName || 'Business Logo'}
+                        className="max-h-[60px] max-w-[160px] object-contain"
+                      />
+                    </div>
+                  )}
                   <div className="bg-slate-900 text-white p-3.5 flex justify-between items-center rounded-xl">
                     <span className="font-bold text-sm tracking-wider uppercase">
                       {docData.business.businessName || 'BUSINESS NAME'}
@@ -1488,14 +1506,23 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
 
               {/* Minimalist Header */}
               {docData.template === 'minimalist' && (
-                <div className="flex justify-between items-baseline border-b border-zinc-200 pb-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-zinc-900 tracking-tight">
-                      {docData.business.businessName || 'Business Name'}
-                    </h2>
-                    <p className="text-xs text-zinc-500 font-normal">{docData.business.email}</p>
+                <div className="flex justify-between items-start border-b border-zinc-200 pb-3 gap-4">
+                  <div className="flex items-center gap-3.5">
+                    {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
+                      <img
+                        src={docData.business.logoUrl}
+                        alt={docData.business.businessName || 'Business Logo'}
+                        className="max-h-[50px] max-w-[140px] object-contain shrink-0"
+                      />
+                    )}
+                    <div>
+                      <h2 className="text-lg font-bold text-zinc-900 tracking-tight">
+                        {docData.business.businessName || 'Business Name'}
+                      </h2>
+                      <p className="text-xs text-zinc-500 font-normal">{docData.business.email}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <span className="text-xs font-semibold text-zinc-400 tracking-wider">
                       {isQuotation ? 'ESTIMATE / QUOTE' : 'INVOICE'}
                     </span>

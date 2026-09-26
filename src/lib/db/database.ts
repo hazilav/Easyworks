@@ -164,7 +164,21 @@ function initDatabase(db: DatabaseSync) {
       business_name TEXT NOT NULL,
       owner_name TEXT NOT NULL,
       currency TEXT NOT NULL DEFAULT 'INR',
+      logo_url TEXT,
+      logo_enabled INTEGER NOT NULL DEFAULT 1,
+      tagline TEXT,
+      phone TEXT,
+      email TEXT,
+      website TEXT,
+      address TEXT,
+      tax_number TEXT,
+      default_tax_percentage REAL DEFAULT 18,
+      default_payment_terms TEXT,
+      default_validity_days INTEGER DEFAULT 15,
+      terms_and_conditions TEXT,
+      bank_details_json TEXT,
       created_at TEXT NOT NULL,
+      updated_at TEXT,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -402,6 +416,22 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_downloads_used INTEGER NOT NULL DEFAULT 0;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN signup_session_id TEXT;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN code_hash TEXT;'); } catch {}
+
+  // Safe migrations for businesses table
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_url TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled INTEGER NOT NULL DEFAULT 1;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN tagline TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN phone TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN email TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN website TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN address TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN tax_number TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN default_tax_percentage REAL DEFAULT 18;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN default_payment_terms TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN default_validity_days INTEGER DEFAULT 15;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN terms_and_conditions TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN bank_details_json TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN updated_at TEXT;'); } catch {}
 
   // Update plan prices, names, and PDF download limits: Basic=299 (30), Standard=849 (90), Premium=1699 (180)
   try {
@@ -3508,6 +3538,8 @@ export function getAllBusinessesOverview(): any[] {
       u.status as user_status,
       u.created_at,
       b.currency,
+      b.logo_url,
+      b.logo_enabled,
       s.status as subscription_status,
       s.plan_id,
       p.name as plan_name,
@@ -3531,6 +3563,9 @@ export function getAllBusinessesOverview(): any[] {
     businessName: r.business_name || 'Individual Contractor',
     userStatus: r.user_status,
     currency: r.currency || 'INR',
+    hasLogo: Boolean(r.logo_url && r.logo_url.trim().length > 0),
+    logoUrl: r.logo_url || null,
+    logoEnabled: r.logo_enabled === 1,
     createdAt: r.created_at,
     subscriptionStatus: r.subscription_status || 'TRIALING',
     planName: r.plan_name || 'Free Trial',
@@ -3606,5 +3641,126 @@ export function getAllDocumentsOverview(typeFilter?: 'all' | 'quotations' | 'inv
   }
 
   return items;
+}
+
+/**
+ * Update or insert business logo for a user.
+ */
+export function updateBusinessLogo(userId: string, logoUrl: string, logoEnabled = true): { success: boolean; logoUrl: string; logoEnabled: boolean } {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
+
+  if (existing) {
+    db.prepare(`
+      UPDATE businesses 
+      SET logo_url = ?, logo_enabled = ?, updated_at = ? 
+      WHERE user_id = ?
+    `).run(logoUrl, logoEnabled ? 1 : 0, now, userId);
+  } else {
+    const user = db.prepare('SELECT name, business_name FROM users WHERE id = ?').get(userId) as any;
+    const bizId = 'biz_' + crypto.randomUUID().slice(0, 8);
+    db.prepare(`
+      INSERT INTO businesses (
+        id, user_id, business_name, owner_name, currency, logo_url, logo_enabled, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?)
+    `).run(
+      bizId,
+      userId,
+      user?.business_name || 'My Business',
+      user?.name || 'Owner',
+      logoUrl,
+      logoEnabled ? 1 : 0,
+      now,
+      now
+    );
+  }
+
+  logActivity(userId, 'BUSINESS_LOGO_UPDATED', 'Business logo updated', 'USER');
+  return { success: true, logoUrl, logoEnabled };
+}
+
+/**
+ * Toggle business logo visibility on documents for a user.
+ */
+export function toggleBusinessLogo(userId: string, logoEnabled: boolean): { success: boolean; logoEnabled: boolean } {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE businesses 
+    SET logo_enabled = ?, updated_at = ? 
+    WHERE user_id = ?
+  `).run(logoEnabled ? 1 : 0, now, userId);
+
+  logActivity(userId, 'BUSINESS_LOGO_TOGGLED', `Business logo visibility set to ${logoEnabled ? 'enabled' : 'disabled'}`, 'USER');
+  return { success: true, logoEnabled };
+}
+
+/**
+ * Remove business logo for a user.
+ */
+export function removeBusinessLogo(userId: string): { success: boolean } {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE businesses 
+    SET logo_url = NULL, updated_at = ? 
+    WHERE user_id = ?
+  `).run(now, userId);
+
+  logActivity(userId, 'BUSINESS_LOGO_REMOVED', 'Business logo removed', 'USER');
+  return { success: true };
+}
+
+/**
+ * Get business logo status for a user.
+ */
+export function getBusinessLogo(userId: string): { logoUrl: string | null; logoEnabled: boolean } {
+  const db = getDatabase();
+  const row = db.prepare('SELECT logo_url, logo_enabled FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!row) {
+    return { logoUrl: null, logoEnabled: true };
+  }
+  return {
+    logoUrl: row.logo_url || null,
+    logoEnabled: row.logo_enabled !== 0,
+  };
+}
+
+/**
+ * Get full business profile for a user.
+ */
+export function getBusinessProfileByUserId(userId: string): any | null {
+  const db = getDatabase();
+  const row = db.prepare('SELECT * FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!row) return null;
+
+  let bankDetails: any = undefined;
+  if (row.bank_details_json) {
+    try {
+      bankDetails = JSON.parse(row.bank_details_json);
+    } catch {}
+  }
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    businessName: row.business_name,
+    ownerName: row.owner_name,
+    tagline: row.tagline || '',
+    phone: row.phone || '',
+    email: row.email || '',
+    website: row.website || '',
+    address: row.address || '',
+    taxNumber: row.tax_number || '',
+    currency: row.currency || 'INR',
+    defaultTaxPercentage: row.default_tax_percentage ?? 18,
+    defaultPaymentTerms: row.default_payment_terms || '',
+    defaultValidityDays: row.default_validity_days ?? 15,
+    termsAndConditions: row.terms_and_conditions || '',
+    bankDetails,
+    logoUrl: row.logo_url || '',
+    logoEnabled: row.logo_enabled !== 0,
+  };
 }
 
