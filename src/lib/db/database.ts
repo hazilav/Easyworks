@@ -592,7 +592,7 @@ function initDatabase(db: DatabaseSync) {
       `).run(hash, salt, adminEmail);
     } else {
       const now = new Date().toISOString();
-      const adminId = 'usr_super_admin_hazil';
+      const adminId = 'usr_bXVoYW1tZW';
       db.prepare(`
         INSERT INTO users (id, email, name, business_name, role, phone, status, password_hash, password_salt, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1668,6 +1668,7 @@ export function getAllSubscribers(): any[] {
     FROM users u
     LEFT JOIN subscriptions s ON u.id = s.user_id
     LEFT JOIN plans p ON s.plan_id = p.id
+    WHERE u.role NOT IN ('SUPER_ADMIN', 'developer', 'admin')
     ORDER BY u.created_at DESC
   `).all() as any[];
 
@@ -2785,7 +2786,8 @@ export function updateDeveloperPassword(newPassword: string): boolean {
   db.prepare(`
     UPDATE users SET password_hash = ?, password_salt = ? WHERE email = ?
   `).run(hash, salt, adminEmail);
-  logActivity('usr_super_admin_hazil', 'PASSWORD_CHANGED', 'Super Admin updated password', 'SUPER_ADMIN');
+  const adminUser = db.prepare('SELECT id FROM users WHERE email = ?').get(adminEmail) as any;
+  logActivity(adminUser?.id || 'usr_bXVoYW1tZW', 'PASSWORD_CHANGED', 'Super Admin updated password', 'SUPER_ADMIN');
   return true;
 }
 
@@ -2794,15 +2796,15 @@ export function getDeveloperStats(): DeveloperStats {
   const now = new Date();
   const nowISO = now.toISOString();
 
-  // Total customers (exclude super admin)
-  const totalCustRow = db.prepare("SELECT COUNT(*) as count FROM users WHERE role != 'SUPER_ADMIN'").get() as any;
+  // Total customers (exclude super admin and internal staff)
+  const totalCustRow = db.prepare("SELECT COUNT(*) as count FROM users WHERE role NOT IN ('SUPER_ADMIN', 'developer', 'admin')").get() as any;
   const totalCustomers = totalCustRow ? totalCustRow.count : 0;
 
   // Subscriptions breakdown
   const subs = db.prepare(`
     SELECT s.*, u.role FROM subscriptions s
     JOIN users u ON s.user_id = u.id
-    WHERE u.role != 'SUPER_ADMIN'
+    WHERE u.role NOT IN ('SUPER_ADMIN', 'developer', 'admin')
   `).all() as any[];
 
   let activeSubscriptions = 0;
@@ -2869,7 +2871,7 @@ export function getDeveloperStats(): DeveloperStats {
   // New customers in last 7 days
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const newCustRow = db.prepare(`
-    SELECT COUNT(*) as count FROM users WHERE role != 'SUPER_ADMIN' AND created_at >= ?
+    SELECT COUNT(*) as count FROM users WHERE role NOT IN ('SUPER_ADMIN', 'developer', 'admin') AND created_at >= ?
   `).get(sevenDaysAgo) as any;
   const newCustomers = newCustRow ? newCustRow.count : 0;
 
@@ -2920,7 +2922,7 @@ export function getAllCustomersWithDetails(filter?: string, search?: string): De
     LEFT JOIN subscriptions s ON u.id = s.user_id
     LEFT JOIN plans p ON s.plan_id = p.id
     LEFT JOIN trial_identities t ON u.id = t.user_id
-    WHERE u.role != 'SUPER_ADMIN'
+    WHERE u.role NOT IN ('SUPER_ADMIN', 'developer', 'admin')
     ORDER BY u.created_at DESC
   `;
 
@@ -3551,7 +3553,7 @@ export function getAllBusinessesOverview(): any[] {
     LEFT JOIN businesses b ON b.user_id = u.id
     LEFT JOIN subscriptions s ON s.user_id = u.id
     LEFT JOIN plans p ON p.id = s.plan_id
-    WHERE u.role != 'developer'
+    WHERE u.role NOT IN ('SUPER_ADMIN', 'developer', 'admin')
     ORDER BY u.created_at DESC
   `).all() as any[];
 

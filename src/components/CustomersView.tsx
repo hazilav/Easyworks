@@ -99,74 +99,95 @@ export default function CustomersView() {
           </div>
         </div>
 
-        {/* Customer Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredCustomers.map((cust) => (
-            <div
-              key={cust.id}
-              className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-6 space-y-4 shadow-2xs hover:border-slate-300 dark:hover:border-zinc-700 transition-colors flex flex-col justify-between"
+        {/* Customer Cards Grid / Empty State */}
+        {filteredCustomers.length === 0 ? (
+          <div className="text-center py-16 px-4 bg-white dark:bg-zinc-900 rounded-2xl border border-dashed border-slate-200 dark:border-zinc-800 shadow-2xs">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-3">
+              <Users className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">No customers found</h3>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
+              {searchTerm
+                ? 'No clients match your search filter.'
+                : 'Your customer directory is empty. Add your first customer to quickly start creating quotations and invoices.'}
+            </p>
+            <button
+              onClick={() => setIsAdding(true)}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
             >
-              <div>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">{cust.name}</h3>
-                    {cust.company && (
-                      <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
-                        {cust.company}
-                      </p>
+              <Plus className="w-4 h-4" />
+              <span>Add your first customer</span>
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredCustomers.map((cust) => (
+              <div
+                key={cust.id}
+                className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 p-6 space-y-4 shadow-2xs hover:border-slate-300 dark:hover:border-zinc-700 transition-colors flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900 dark:text-white">{cust.name}</h3>
+                      {cust.company && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mt-0.5">
+                          {cust.company}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => deleteCustomer(cust.id)}
+                      className="h-8 w-8 inline-flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"
+                      title="Delete customer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="mt-3.5 space-y-2 text-xs text-slate-600 dark:text-zinc-400">
+                    {cust.phone && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="font-normal">{cust.phone}</span>
+                      </div>
+                    )}
+                    {cust.email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="truncate font-normal">{cust.email}</span>
+                      </div>
+                    )}
+                    {cust.address && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="truncate font-normal">{cust.address}</span>
+                      </div>
+                    )}
+                    {cust.taxNumber && (
+                      <div className="text-[11px] text-slate-400 font-mono mt-1">
+                        Tax/GST: {cust.taxNumber}
+                      </div>
                     )}
                   </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    Added {new Date(cust.createdAt).toLocaleDateString()}
+                  </span>
                   <button
-                    onClick={() => deleteCustomer(cust.id)}
-                    className="h-8 w-8 inline-flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"
-                    title="Delete customer"
+                    onClick={() => handleStartQuoteForCustomer(cust)}
+                    className="h-8 px-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Start Quote</span>
                   </button>
                 </div>
-
-                <div className="mt-3.5 space-y-2 text-xs text-slate-600 dark:text-zinc-400">
-                  {cust.phone && (
-                    <div className="flex items-center gap-2">
-                      <Phone className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="font-normal">{cust.phone}</span>
-                    </div>
-                  )}
-                  {cust.email && (
-                    <div className="flex items-center gap-2">
-                      <Mail className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="truncate font-normal">{cust.email}</span>
-                    </div>
-                  )}
-                  {cust.address && (
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="truncate font-normal">{cust.address}</span>
-                    </div>
-                  )}
-                  {cust.taxNumber && (
-                    <div className="text-[11px] text-slate-400 font-mono mt-1">
-                      Tax/GST: {cust.taxNumber}
-                    </div>
-                  )}
-                </div>
               </div>
-
-              <div className="pt-4 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400 font-normal">
-                  Added {new Date(cust.createdAt).toLocaleDateString()}
-                </span>
-                <button
-                  onClick={() => handleStartQuoteForCustomer(cust)}
-                  className="h-8 px-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 rounded-lg text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Start Quote</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         {/* Modal for Add Customer */}
         {isAdding && (
@@ -183,7 +204,7 @@ export default function CustomersView() {
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g. Sameer or Ahmed"
+                    placeholder="e.g. Rahul Sharma"
                     className="h-10 w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 px-3.5 rounded-xl text-xs text-slate-900 dark:text-white"
                   />
                 </div>
@@ -196,7 +217,7 @@ export default function CustomersView() {
                     type="text"
                     value={formData.company}
                     onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                    placeholder="e.g. Skyline Residencies"
+                    placeholder="e.g. Apex Global Solutions"
                     className="h-10 w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 px-3.5 rounded-xl text-xs text-slate-900 dark:text-white"
                   />
                 </div>

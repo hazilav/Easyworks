@@ -3,25 +3,25 @@ import { calculateQuotationTotals, generateQuotationNumber } from './calculator'
 
 export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
   id: 'biz_default',
-  businessName: 'Easyworks Interiors & Fabrication',
-  tagline: 'Precision Craftsmanship & Smart Design',
-  ownerName: 'Admin',
-  phone: '+91 98765 43210',
-  email: 'contact@easyworks.com',
-  website: 'https://easyworks.com',
-  address: 'Suite 402, High Street Plaza, Kochi, Kerala - 682001',
-  taxNumber: '32AABCE1234F1Z5',
+  businessName: '',
+  tagline: '',
+  ownerName: '',
+  phone: '',
+  email: '',
+  website: '',
+  address: '',
+  taxNumber: '',
   currency: 'INR',
   defaultTaxPercentage: 18,
   defaultPaymentTerms: '50% advance on order confirmation, 40% on material dispatch, 10% on completion.',
   defaultValidityDays: 15,
   termsAndConditions: '1. Quotation is valid for 15 days from the date of issue.\n2. Variations or scope adjustments will be charged extra.\n3. Taxes as applicable per statutory norms.\n4. Work begins within 3 days of advance clearance.',
   bankDetails: {
-    bankName: 'HDFC Bank Ltd',
-    accountName: 'Easyworks Solutions',
-    accountNumber: '50200012345678',
-    ifscOrRouting: 'HDFC0001234',
-    upiId: 'easyworks@hdfcbank',
+    bankName: '',
+    accountName: '',
+    accountNumber: '',
+    ifscOrRouting: '',
+    upiId: '',
   },
   logoUrl: '',
   logoEnabled: true,
@@ -102,36 +102,7 @@ export const INITIAL_CATALOG_ITEMS: CatalogItem[] = [
   },
 ];
 
-export const INITIAL_CUSTOMERS: Customer[] = [
-  {
-    id: 'cust-1',
-    name: 'Ahmed',
-    company: 'Ahmed Villa',
-    phone: '+91 98450 11223',
-    email: 'ahmed@example.com',
-    address: 'Kakkanad, Kochi, Kerala',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'cust-2',
-    name: 'Sameer',
-    company: 'Skyline Residencies',
-    phone: '+91 97400 98765',
-    email: 'sameer.work@gmail.com',
-    address: 'Flat 4B, Skyline Gardens, Marine Drive',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'cust-3',
-    name: 'ABC Company',
-    company: 'ABC Technologies Pvt Ltd',
-    phone: '+91 99999 88888',
-    email: 'procurement@abccompany.com',
-    address: 'Infopark Phase 2, Kochi',
-    taxNumber: '32AABCA9999X1Z1',
-    createdAt: new Date().toISOString(),
-  },
-];
+export const INITIAL_CUSTOMERS: Customer[] = [];
 
 export function createBlankQuotation(business: BusinessProfile = DEFAULT_BUSINESS_PROFILE, template: 'modern' | 'classic' | 'minimalist' = 'modern'): Quotation {
   const today = new Date();
