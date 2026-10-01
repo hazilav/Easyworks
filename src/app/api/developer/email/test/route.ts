@@ -31,7 +31,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
     const body = parsed.success ? parsed.body || {} : {};
     const { testEmail, action = 'send' } = body;
 
-    // 1. Connection-only check
+    // 1. Connection-only check (Requirement 5 & 8)
     if (action === 'test_connection' || !testEmail) {
       const conn = await testEmailConnection();
       const config = getEmailConfig();
@@ -39,9 +39,11 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
       return NextResponse.json(
         {
           success: conn.connected,
-          connection: conn.connected ? 'Connected' : 'Failed',
+          connection: conn.connected ? 'success' : 'failed',
+          status: conn.connected ? 'Connected' : 'Failed',
           send: 'Not Attempted',
           error: conn.error || null,
+          diagnostics: conn.diagnostics || config.diagnostics,
           configSummary: {
             isConfigured: config.isConfigured,
             provider: config.provider,
@@ -57,7 +59,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
       );
     }
 
-    // 2. Full delivery test
+    // 2. Full delivery test (Requirement 6 & 8)
     const cleanEmail = String(testEmail).trim().toLowerCase();
     if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       return NextResponse.json(
@@ -76,22 +78,27 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
     return NextResponse.json(
       {
         success: result.send === 'Accepted',
-        connection: result.connection,
+        connection: result.connection === 'Connected' ? 'success' : 'failed',
+        status: result.connection,
         send: result.send,
         error: result.error || null,
         messageId: result.messageId || null,
         recipient: cleanEmail,
+        diagnostics: result.diagnostics,
         requestId,
       },
       { status: 200 }
     );
   } catch (error: any) {
+    const config = getEmailConfig();
     return NextResponse.json(
       {
         success: false,
-        connection: 'Failed',
+        connection: 'failed',
+        status: 'Failed',
         send: 'Failed',
         error: error.message || 'Internal error executing email diagnostic.',
+        diagnostics: config.diagnostics,
         requestId,
       },
       { status: 500 }

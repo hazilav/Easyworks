@@ -30,6 +30,14 @@ interface EmailSettingsState {
   isActive: boolean;
 }
 
+export interface EmailDiagnostics {
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  smtpHostConfigured: boolean;
+  smtpUserConfigured: boolean;
+  smtpPasswordConfigured: boolean;
+  senderConfigured: boolean;
+}
+
 interface TestEmailResult {
   connection: 'Connected' | 'Failed';
   send: 'Accepted' | 'Failed' | 'Not Attempted';
@@ -37,6 +45,7 @@ interface TestEmailResult {
   messageId?: string | null;
   recipient?: string;
   timestamp?: string;
+  diagnostics?: EmailDiagnostics | null;
 }
 
 export default function DeveloperSettingsView() {
@@ -56,6 +65,7 @@ export default function DeveloperSettingsView() {
   });
   const [emailSource, setEmailSource] = useState<'database' | 'environment' | 'none'>('none');
   const [isConfigured, setIsConfigured] = useState(false);
+  const [emailDiagnostics, setEmailDiagnostics] = useState<EmailDiagnostics | null>(null);
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [savingEmail, setSavingEmail] = useState(false);
   const [emailSuccessMsg, setEmailSuccessMsg] = useState('');
@@ -105,6 +115,7 @@ export default function DeveloperSettingsView() {
         success?: boolean;
         settings?: any;
         activeConfig?: any;
+        diagnostics?: EmailDiagnostics;
       }>('/api/developer/email/settings', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -127,6 +138,10 @@ export default function DeveloperSettingsView() {
         setEmailSource(data.activeConfig.source || 'none');
         setIsConfigured(Boolean(data.activeConfig.isConfigured));
       }
+
+      if (data?.diagnostics) {
+        setEmailDiagnostics(data.diagnostics);
+      }
     } catch (err) {
       console.error('Failed to load email settings:', err);
     } finally {
@@ -141,7 +156,12 @@ export default function DeveloperSettingsView() {
       setEmailSuccessMsg('');
       const token = getAuthToken();
 
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; message?: string; error?: string }>(
+      const { ok, data, error } = await safeFetchJson<{
+        success?: boolean;
+        message?: string;
+        error?: string;
+        diagnostics?: EmailDiagnostics;
+      }>(
         '/api/developer/email/settings',
         {
           method: 'POST',
@@ -155,6 +175,9 @@ export default function DeveloperSettingsView() {
 
       if (ok && data?.success) {
         setEmailSuccessMsg('Email configuration saved successfully.');
+        if (data.diagnostics) {
+          setEmailDiagnostics(data.diagnostics);
+        }
         fetchEmailSettings();
         setTimeout(() => setEmailSuccessMsg(''), 4000);
       } else {
@@ -175,9 +198,10 @@ export default function DeveloperSettingsView() {
 
       const { data } = await safeFetchJson<{
         success?: boolean;
-        connection: 'Connected' | 'Failed';
+        connection: 'Connected' | 'Failed' | 'success' | 'failed';
         send: 'Not Attempted';
         error?: string | null;
+        diagnostics?: EmailDiagnostics;
       }>('/api/developer/email/test', {
         method: 'POST',
         headers: {
@@ -187,12 +211,18 @@ export default function DeveloperSettingsView() {
         body: JSON.stringify({ action: 'test_connection' }),
       });
 
+      const isConnected = data?.connection === 'success' || data?.connection === 'Connected' || Boolean(data?.success);
       setTestResult({
-        connection: data?.connection || 'Failed',
+        connection: isConnected ? 'Connected' : 'Failed',
         send: 'Not Attempted',
         error: data?.error,
         timestamp: new Date().toLocaleTimeString(),
+        diagnostics: data?.diagnostics,
       });
+
+      if (data?.diagnostics) {
+        setEmailDiagnostics(data.diagnostics);
+      }
     } catch (err: any) {
       setTestResult({
         connection: 'Failed',
@@ -219,11 +249,12 @@ export default function DeveloperSettingsView() {
 
       const { data } = await safeFetchJson<{
         success?: boolean;
-        connection: 'Connected' | 'Failed';
+        connection: 'Connected' | 'Failed' | 'success' | 'failed';
         send: 'Accepted' | 'Failed';
         error?: string | null;
         messageId?: string | null;
         recipient?: string;
+        diagnostics?: EmailDiagnostics;
       }>('/api/developer/email/test', {
         method: 'POST',
         headers: {
@@ -233,14 +264,20 @@ export default function DeveloperSettingsView() {
         body: JSON.stringify({ action: 'send', testEmail: testRecipient }),
       });
 
+      const isConnected = data?.connection === 'success' || data?.connection === 'Connected' || Boolean(data?.success);
       setTestResult({
-        connection: data?.connection || 'Failed',
+        connection: isConnected ? 'Connected' : 'Failed',
         send: data?.send || 'Failed',
         error: data?.error,
         messageId: data?.messageId,
         recipient: testRecipient,
         timestamp: new Date().toLocaleTimeString(),
+        diagnostics: data?.diagnostics,
       });
+
+      if (data?.diagnostics) {
+        setEmailDiagnostics(data.diagnostics);
+      }
     } catch (err: any) {
       setTestResult({
         connection: 'Connected',
@@ -453,6 +490,40 @@ export default function DeveloperSettingsView() {
               </button>
             </div>
 
+            {/* Safe Diagnostic Information (Requirement 8) */}
+            {emailDiagnostics && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-2xl bg-[#0e131f] border border-zinc-800/80 text-xs">
+                <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block">Source</span>
+                  <span className="font-bold text-zinc-200 mt-0.5 block">{emailDiagnostics.source}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block">SMTP Host</span>
+                  <span className={`font-bold mt-0.5 block ${emailDiagnostics.smtpHostConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {emailDiagnostics.smtpHostConfigured ? 'YES' : 'NO'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block">SMTP User</span>
+                  <span className={`font-bold mt-0.5 block ${emailDiagnostics.smtpUserConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {emailDiagnostics.smtpUserConfigured ? 'YES' : 'NO'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block">SMTP Password</span>
+                  <span className={`font-bold mt-0.5 block ${emailDiagnostics.smtpPasswordConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {emailDiagnostics.smtpPasswordConfigured ? 'YES' : 'NO'}
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-zinc-900/80 border border-zinc-800">
+                  <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider block">Sender Email</span>
+                  <span className={`font-bold mt-0.5 block ${emailDiagnostics.senderConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                    {emailDiagnostics.senderConfigured ? 'YES' : 'NO'}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Diagnostic Results Box (Requirement 9) */}
             {testResult && (
               <div className="p-5 rounded-2xl bg-[#0e131f] border border-zinc-800 space-y-3">
@@ -608,16 +679,24 @@ export default function DeveloperSettingsView() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                    SMTP Password / App Key *
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-medium text-zinc-300">
+                      SMTP Password / App Key *
+                    </label>
+                    <span className="text-[10px] text-zinc-400">
+                      Gmail: Use 16-character Google App Password
+                    </span>
+                  </div>
                   <input
                     type="password"
                     value={emailSettings.smtpPass}
                     onChange={(e) => setEmailSettings({ ...emailSettings, smtpPass: e.target.value })}
-                    placeholder="Leave unchanged or enter new app password"
+                    placeholder="Enter Google App Password or keep saved password"
                     className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
                   />
+                  <p className="text-[11px] text-zinc-400 mt-1">
+                    Password is never exposed in responses or logs. Leaving •••••••• preserves the existing saved password in SQLite.
+                  </p>
                 </div>
 
                 <div>

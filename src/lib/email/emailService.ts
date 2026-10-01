@@ -1,6 +1,14 @@
 import nodemailer from 'nodemailer';
-import { getRawEmailSettings } from '@/lib/db/database';
+import { getActiveEmailSettings, ActiveEmailSettings } from '@/lib/db/database';
 import { extractDomain } from '@/lib/abuse/normalizers';
+
+export interface EmailDiagnostics {
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  smtpHostConfigured: boolean;
+  smtpUserConfigured: boolean;
+  smtpPasswordConfigured: boolean;
+  senderConfigured: boolean;
+}
 
 export interface EmailProviderConfig {
   provider: 'smtp' | 'resend' | 'sendgrid';
@@ -13,6 +21,7 @@ export interface EmailProviderConfig {
   senderName: string;
   isConfigured: boolean;
   source: 'database' | 'environment' | 'none';
+  diagnostics: EmailDiagnostics;
 }
 
 /**
@@ -54,70 +63,66 @@ export function logOtpAudit(entry: {
  * Priority:
  * 1. Active database `email_settings` table record
  * 2. Environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM)
+ * 3. None (unconfigured)
  */
 export function getEmailConfig(): EmailProviderConfig {
-  // 1. Check database settings
+  // 1. Fetch active settings from SQLite database
+  let settings: ActiveEmailSettings | null = null;
   try {
-    const dbSettings = getRawEmailSettings();
-    if (
-      dbSettings &&
-      dbSettings.isActive &&
-      dbSettings.smtpHost &&
-      dbSettings.smtpUser &&
-      dbSettings.rawPassword
-    ) {
-      return {
-        provider: dbSettings.provider || 'smtp',
-        smtpHost: dbSettings.smtpHost.trim(),
-        smtpPort: Number(dbSettings.smtpPort) || 587,
-        smtpUser: dbSettings.smtpUser.trim(),
-        smtpPass: dbSettings.rawPassword,
-        smtpSecure: Boolean(dbSettings.smtpSecure),
-        senderEmail: dbSettings.senderEmail?.trim() || dbSettings.smtpUser.trim(),
-        senderName: dbSettings.senderName?.trim() || 'Easyworks',
-        isConfigured: true,
-        source: 'database',
-      };
-    }
-  } catch {
-    // database might not be initialized yet, fallback to env
+    settings = getActiveEmailSettings();
+  } catch (err) {
+    console.error('[emailService] Error loading active email_settings from database:', err);
   }
 
-  // 2. Check environment variables
-  const host = process.env.SMTP_HOST || '';
-  const user = process.env.SMTP_USER || process.env.SMTP_USERNAME || '';
-  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || '';
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const secure = process.env.SMTP_SECURE === 'true' || port === 465;
-  const senderEmail = process.env.EMAIL_FROM || process.env.SENDER_EMAIL || user;
-  const senderName = process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks';
+  // 2. Resolve credentials using priority: Database -> Environment
+  const host = (settings?.smtp_host || settings?.smtpHost || process.env.SMTP_HOST || '').trim();
+  const port = Number(settings?.smtp_port || settings?.smtpPort || process.env.SMTP_PORT) || 587;
+  const user = (settings?.smtp_user || settings?.smtpUser || process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
+  let pass = (settings?.smtp_pass || settings?.smtpPass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
 
-  if (host && user && pass) {
-    return {
-      provider: 'smtp',
-      smtpHost: host.trim(),
-      smtpPort: port,
-      smtpUser: user.trim(),
-      smtpPass: pass,
-      smtpSecure: secure,
-      senderEmail: senderEmail.trim(),
-      senderName: senderName.trim(),
-      isConfigured: true,
-      source: 'environment',
-    };
+  // If host or user is Gmail, automatically strip spaces from 16-character Google App Passwords
+  if (
+    (host.toLowerCase().includes('gmail') || user.toLowerCase().includes('@gmail.com')) &&
+    /^[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}$/i.test(pass)
+  ) {
+    pass = pass.replace(/\s+/g, '');
   }
+
+  const secure = settings?.smtp_secure ?? settings?.smtpSecure ?? (process.env.SMTP_SECURE === 'true' || port === 465);
+  const from = (settings?.email_from || settings?.sender_email || settings?.senderEmail || process.env.EMAIL_FROM || process.env.SENDER_EMAIL || user).trim();
+  const fromName = (settings?.email_from_name || settings?.sender_name || settings?.senderName || process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks').trim();
+
+  // Check which source provided credentials
+  const hasDb = Boolean(settings && (settings.smtp_host || settings.smtpHost) && (settings.smtp_user || settings.smtpUser));
+  const hasEnv = Boolean(process.env.SMTP_HOST && (process.env.SMTP_USER || process.env.SMTP_USERNAME));
+  const source: 'DATABASE' | 'ENVIRONMENT' | 'NONE' = hasDb ? 'DATABASE' : hasEnv ? 'ENVIRONMENT' : 'NONE';
+
+  const smtpHostConfigured = Boolean(host);
+  const smtpUserConfigured = Boolean(user);
+  const smtpPasswordConfigured = Boolean(pass);
+  const senderConfigured = Boolean(from);
+  const isConfigured = Boolean(host && user && pass);
+
+  const diagnostics: EmailDiagnostics = {
+    source,
+    smtpHostConfigured,
+    smtpUserConfigured,
+    smtpPasswordConfigured,
+    senderConfigured,
+  };
 
   return {
-    provider: 'smtp',
-    smtpHost: '',
-    smtpPort: 587,
-    smtpUser: '',
-    smtpPass: '',
-    smtpSecure: false,
-    senderEmail: '',
-    senderName: 'Easyworks',
-    isConfigured: false,
-    source: 'none',
+    provider: (settings?.provider as any) || 'smtp',
+    smtpHost: host,
+    smtpPort: port,
+    smtpUser: user,
+    smtpPass: pass,
+    smtpSecure: secure,
+    senderEmail: from || user,
+    senderName: fromName || 'Easyworks',
+    isConfigured,
+    source: (source.toLowerCase() as 'database' | 'environment' | 'none'),
+    diagnostics,
   };
 }
 
@@ -125,8 +130,10 @@ export function getEmailConfig(): EmailProviderConfig {
  * Creates a configured Nodemailer transporter instance.
  */
 export function createTransporter(config: EmailProviderConfig) {
-  if (!config.isConfigured || !config.smtpHost) {
-    throw new Error('Email provider is not configured. Missing SMTP host or credentials.');
+  if (!config.isConfigured || !config.smtpHost || !config.smtpUser || !config.smtpPass) {
+    const err: any = new Error('Email provider is not configured. Missing SMTP host or credentials.');
+    err.code = 'EMAIL_CONFIG_MISSING';
+    throw err;
   }
 
   return nodemailer.createTransport({
@@ -149,8 +156,12 @@ export function createTransporter(config: EmailProviderConfig) {
  * Never leaks credentials in errors.
  */
 export async function testEmailConnection(): Promise<{
+  success: boolean;
   connected: boolean;
+  connection: 'Connected' | 'Failed';
+  status: 'success' | 'failed';
   error?: string;
+  diagnostics?: EmailDiagnostics;
   configSummary?: {
     host: string;
     port: number;
@@ -160,10 +171,20 @@ export async function testEmailConnection(): Promise<{
   };
 }> {
   const config = getEmailConfig();
+
   if (!config.isConfigured) {
+    const missing: string[] = [];
+    if (!config.diagnostics.smtpHostConfigured) missing.push('SMTP_HOST');
+    if (!config.diagnostics.smtpUserConfigured) missing.push('SMTP_USER');
+    if (!config.diagnostics.smtpPasswordConfigured) missing.push('SMTP_PASS');
+
     return {
+      success: false,
       connected: false,
-      error: 'SMTP credentials not configured. Please set SMTP_HOST, SMTP_USER, and SMTP_PASS or configure in Developer Settings.',
+      connection: 'Failed',
+      status: 'failed',
+      error: `SMTP credentials not configured. Missing: ${missing.join(', ')}. Please configure in Developer Settings or set environment variables.`,
+      diagnostics: config.diagnostics,
     };
   }
 
@@ -171,7 +192,11 @@ export async function testEmailConnection(): Promise<{
     const transporter = createTransporter(config);
     await transporter.verify();
     return {
+      success: true,
       connected: true,
+      connection: 'Connected',
+      status: 'success',
+      diagnostics: config.diagnostics,
       configSummary: {
         host: config.smtpHost,
         port: config.smtpPort,
@@ -182,12 +207,19 @@ export async function testEmailConnection(): Promise<{
     };
   } catch (err: any) {
     // Sanitize any potential secret leakage from error message
-    const msg = (err?.message || 'SMTP connection failed')
-      .replace(config.smtpPass, '[REDACTED]')
-      .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
+    let msg = err?.message || 'SMTP connection failed';
+    if (config.smtpPass) {
+      msg = msg.split(config.smtpPass).join('[REDACTED]');
+    }
+    msg = msg.replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
+
     return {
+      success: false,
       connected: false,
+      connection: 'Failed',
+      status: 'failed',
       error: msg,
+      diagnostics: config.diagnostics,
     };
   }
 }
@@ -377,11 +409,14 @@ export async function sendDeveloperTestEmail(
   toEmail: string,
   requestId: string = 'req_test_' + Date.now().toString(36)
 ): Promise<{
+  success: boolean;
   connection: 'Connected' | 'Failed';
+  status: 'success' | 'failed';
   send: 'Accepted' | 'Failed';
   error?: string;
   messageId?: string;
   requestId: string;
+  diagnostics?: EmailDiagnostics;
 }> {
   const domain = extractDomain(toEmail);
   const connCheck = await testEmailConnection();
@@ -395,10 +430,13 @@ export async function sendDeveloperTestEmail(
       error: connCheck.error || 'Connection failed',
     });
     return {
+      success: false,
       connection: 'Failed',
+      status: 'failed',
       send: 'Failed',
       error: connCheck.error || 'SMTP Connection failed',
       requestId,
+      diagnostics: connCheck.diagnostics,
     };
   }
 
@@ -440,15 +478,20 @@ export async function sendDeveloperTestEmail(
     });
 
     return {
+      success: true,
       connection: 'Connected',
+      status: 'success',
       send: 'Accepted',
       messageId: info.messageId,
       requestId,
+      diagnostics: connCheck.diagnostics,
     };
   } catch (error: any) {
-    const safeErrorMsg = (error.message || 'Failed to send test email')
-      .replace(config.smtpPass, '[REDACTED]')
-      .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
+    let safeErrorMsg = (error.message || 'Failed to send test email');
+    if (config.smtpPass) {
+      safeErrorMsg = safeErrorMsg.split(config.smtpPass).join('[REDACTED]');
+    }
+    safeErrorMsg = safeErrorMsg.replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
 
     logOtpAudit({
       requestId,
@@ -459,10 +502,13 @@ export async function sendDeveloperTestEmail(
     });
 
     return {
+      success: false,
       connection: 'Connected',
+      status: 'success',
       send: 'Failed',
       error: safeErrorMsg,
       requestId,
+      diagnostics: connCheck.diagnostics,
     };
   }
 }

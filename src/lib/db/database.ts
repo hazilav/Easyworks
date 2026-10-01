@@ -69,30 +69,33 @@ export function getDatabaseFilePath(): string {
   }
 }
 
-// Singleton database instance
-let dbInstance: DatabaseSync | null = null;
+// Global singleton database instance to prevent connection loss/contention across Next.js API routes
+const globalForDb = globalThis as unknown as {
+  __easyworks_db?: DatabaseSync;
+};
 
 export function getDatabase(): DatabaseSync {
-  if (!dbInstance) {
+  if (!globalForDb.__easyworks_db) {
     const dbPath = getDatabaseFilePath();
     try {
-      dbInstance = new DatabaseSync(dbPath);
+      const db = new DatabaseSync(dbPath);
       // Enable foreign keys
-      dbInstance.exec('PRAGMA foreign_keys = ON;');
+      db.exec('PRAGMA foreign_keys = ON;');
       // Try WAL mode, fallback silently if unsupported
       try {
-        dbInstance.exec('PRAGMA journal_mode = WAL;');
+        db.exec('PRAGMA journal_mode = WAL;');
       } catch (walErr) {
         console.warn('[Database] WAL mode unsupported, falling back to default journal mode:', walErr);
       }
-      initDatabase(dbInstance);
+      initDatabase(db);
+      globalForDb.__easyworks_db = db;
       console.log(`[Database] SQLite connected at: ${path.basename(dbPath)}`);
     } catch (dbErr: any) {
       console.error(`[Database] Critical failure initializing SQLite database at ${dbPath}:`, dbErr);
       throw new Error(`Database connection failed: ${dbErr?.message || 'SQLite initialization error'}`);
     }
   }
-  return dbInstance;
+  return globalForDb.__easyworks_db;
 }
 
 export function getDatabaseDiagnostics(): {
@@ -430,6 +433,13 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_downloads_used INTEGER NOT NULL DEFAULT 0;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN signup_session_id TEXT;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN code_hash TEXT;'); } catch {}
+
+  // Safe migrations for email_settings table
+  try { db.exec('ALTER TABLE email_settings ADD COLUMN email_from TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE email_settings ADD COLUMN email_from_name TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE email_settings ADD COLUMN sender_email TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE email_settings ADD COLUMN sender_name TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE email_settings ADD COLUMN is_active INTEGER DEFAULT 1;'); } catch {}
 
   // Safe migrations for businesses table
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_url TEXT;'); } catch {}
@@ -1837,99 +1847,220 @@ export interface EmailSettingsRecord {
   updatedAt: string;
 }
 
-export function getEmailSettings(): EmailSettingsRecord {
+export interface ActiveEmailSettings {
+  id: string;
+  provider: 'smtp' | 'resend' | 'sendgrid';
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  smtp_pass: string;
+  smtp_secure: boolean;
+  email_from: string;
+  email_from_name: string;
+  sender_email: string;
+  sender_name: string;
+  is_active: boolean;
+  updated_at: string;
+  // camelCase aliases
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  rawPassword?: string;
+  smtpSecure: boolean;
+  senderEmail: string;
+  senderName: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+/**
+ * Loads the active email configuration from the database.
+ * Supports both snake_case (Section 1 & 2) and camelCase property access.
+ */
+export function getActiveEmailSettings(): ActiveEmailSettings | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
-  if (!row) {
+  try {
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='email_settings'").get();
+    if (!tableCheck) return null;
+
+    // Fetch active row (is_active = 1 or '1'), falling back to default row
+    const row = (db.prepare(`
+      SELECT * FROM email_settings 
+      WHERE is_active = 1 OR is_active = '1'
+      ORDER BY updated_at DESC 
+      LIMIT 1
+    `).get() || db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get()) as any;
+
+    if (!row) return null;
+
+    const host = String(row.smtp_host || row.host || '').trim();
+    const port = Number(row.smtp_port || row.port) || 587;
+    const user = String(row.smtp_user || row.user || '').trim();
+    const pass = String(row.smtp_pass || row.pass || row.password || '').trim();
+    const secure = Boolean(row.smtp_secure || row.secure);
+    const sender = String(row.email_from || row.sender_email || row.from || user).trim();
+    const name = String(row.email_from_name || row.sender_name || row.from_name || 'Easyworks').trim();
+    const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true;
+
+    return {
+      id: row.id || 'default',
+      provider: (row.provider as any) || 'smtp',
+      smtp_host: host,
+      smtp_port: port,
+      smtp_user: user,
+      smtp_pass: pass,
+      smtp_secure: secure,
+      email_from: sender,
+      email_from_name: name,
+      sender_email: sender,
+      sender_name: name,
+      is_active: active,
+      updated_at: row.updated_at || new Date().toISOString(),
+      smtpHost: host,
+      smtpPort: port,
+      smtpUser: user,
+      smtpPass: pass,
+      rawPassword: pass,
+      smtpSecure: secure,
+      senderEmail: sender,
+      senderName: name,
+      isActive: active,
+      updatedAt: row.updated_at || new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error('[Database] Failed to getActiveEmailSettings:', err);
+    return null;
+  }
+}
+
+/**
+ * Returns raw active email settings (alias for getActiveEmailSettings)
+ */
+export function getRawEmailSettings(): ActiveEmailSettings | null {
+  return getActiveEmailSettings();
+}
+
+/**
+ * Returns email settings formatted for UI display with password masked as ••••••••
+ */
+export function getEmailSettings(): EmailSettingsRecord {
+  const active = getActiveEmailSettings();
+  if (!active || (!active.smtp_host && !active.smtp_user)) {
+    const envHost = process.env.SMTP_HOST || '';
+    const envUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || '';
+    const envPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '';
+    const envPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const envSender = process.env.EMAIL_FROM || process.env.SENDER_EMAIL || envUser;
+    const envName = process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks';
+
     return {
       id: 'default',
       provider: 'smtp',
-      smtpHost: process.env.SMTP_HOST || '',
-      smtpPort: parseInt(process.env.SMTP_PORT || '587', 10),
-      smtpUser: process.env.SMTP_USER || process.env.SMTP_USERNAME || '',
-      smtpPass: process.env.SMTP_PASS || process.env.SMTP_PASSWORD ? '••••••••' : '',
-      smtpSecure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-      senderEmail: process.env.EMAIL_FROM || process.env.SENDER_EMAIL || '',
-      senderName: process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks',
-      isActive: true,
+      smtpHost: envHost,
+      smtpPort: envPort,
+      smtpUser: envUser,
+      smtpPass: envPass ? '••••••••' : '',
+      smtpSecure: process.env.SMTP_SECURE === 'true' || envPort === 465,
+      senderEmail: envSender,
+      senderName: envName,
+      isActive: Boolean(envHost && envUser && envPass),
       updatedAt: new Date().toISOString(),
     };
   }
+
   return {
-    id: row.id,
-    provider: row.provider || 'smtp',
-    smtpHost: row.smtp_host || '',
-    smtpPort: row.smtp_port || 587,
-    smtpUser: row.smtp_user || '',
-    smtpPass: row.smtp_pass ? '••••••••' : '',
-    smtpSecure: Boolean(row.smtp_secure),
-    senderEmail: row.sender_email || '',
-    senderName: row.sender_name || 'Easyworks',
-    isActive: Boolean(row.is_active),
-    updatedAt: row.updated_at,
+    id: active.id,
+    provider: active.provider,
+    smtpHost: active.smtp_host,
+    smtpPort: active.smtp_port,
+    smtpUser: active.smtp_user,
+    smtpPass: active.smtp_pass ? '••••••••' : '',
+    smtpSecure: active.smtp_secure,
+    senderEmail: active.email_from,
+    senderName: active.email_from_name,
+    isActive: active.is_active,
+    updatedAt: active.updated_at,
   };
 }
 
-export function getRawEmailSettings(): (EmailSettingsRecord & { rawPassword?: string }) | null {
+/**
+ * Saves and activates SMTP configuration in email_settings table.
+ * Validates required fields, persists in immediate transaction, and reloads configuration to confirm.
+ */
+export function updateEmailSettings(
+  settings: Partial<EmailSettingsRecord & { email_from?: string; email_from_name?: string }>
+): EmailSettingsRecord {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
-  if (row && row.is_active && row.smtp_host && row.smtp_user) {
-    return {
-      id: row.id,
-      provider: row.provider || 'smtp',
-      smtpHost: row.smtp_host || '',
-      smtpPort: row.smtp_port || 587,
-      smtpUser: row.smtp_user || '',
-      smtpPass: row.smtp_pass || '',
-      rawPassword: row.smtp_pass || '',
-      smtpSecure: Boolean(row.smtp_secure),
-      senderEmail: row.sender_email || '',
-      senderName: row.sender_name || 'Easyworks',
-      isActive: Boolean(row.is_active),
-      updatedAt: row.updated_at,
-    };
-  }
-  return null;
-}
-
-export function updateEmailSettings(settings: Partial<EmailSettingsRecord>): EmailSettingsRecord {
-  const db = getDatabase();
-  const existing = db.prepare('SELECT * FROM email_settings WHERE id = ?').get('default') as any;
+  const existing = getActiveEmailSettings();
   const now = new Date().toISOString();
 
-  // If password provided as mask or empty, keep existing password
-  const newPass = settings.smtpPass && !settings.smtpPass.includes('••••')
-    ? settings.smtpPass
-    : (existing ? existing.smtp_pass : (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || ''));
+  const host = settings.smtpHost !== undefined ? settings.smtpHost.trim() : (existing?.smtp_host || '');
+  const user = settings.smtpUser !== undefined ? settings.smtpUser.trim() : (existing?.smtp_user || '');
+  const port = settings.smtpPort !== undefined ? Number(settings.smtpPort) : (existing?.smtp_port || 587);
+  const secure = settings.smtpSecure !== undefined ? (settings.smtpSecure ? 1 : 0) : (existing?.smtp_secure ? 1 : 0);
+  const senderEmail = settings.senderEmail !== undefined
+    ? settings.senderEmail.trim()
+    : (settings.email_from !== undefined ? settings.email_from.trim() : (existing?.email_from || user));
+  const senderName = settings.senderName !== undefined
+    ? settings.senderName.trim()
+    : (settings.email_from_name !== undefined ? settings.email_from_name.trim() : (existing?.email_from_name || 'Easyworks'));
 
-  db.prepare(`
-    INSERT INTO email_settings (
-      id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
-      sender_email, sender_name, is_active, updated_at
-    ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      provider = excluded.provider,
-      smtp_host = excluded.smtp_host,
-      smtp_port = excluded.smtp_port,
-      smtp_user = excluded.smtp_user,
-      smtp_pass = excluded.smtp_pass,
-      smtp_secure = excluded.smtp_secure,
-      sender_email = excluded.sender_email,
-      sender_name = excluded.sender_name,
-      is_active = excluded.is_active,
-      updated_at = excluded.updated_at
-  `).run(
-    settings.provider || existing?.provider || 'smtp',
-    settings.smtpHost !== undefined ? settings.smtpHost.trim() : (existing?.smtp_host || ''),
-    settings.smtpPort !== undefined ? Number(settings.smtpPort) : (existing?.smtp_port || 587),
-    settings.smtpUser !== undefined ? settings.smtpUser.trim() : (existing?.smtp_user || ''),
-    newPass,
-    settings.smtpSecure !== undefined ? (settings.smtpSecure ? 1 : 0) : (existing?.smtp_secure || 0),
-    settings.senderEmail !== undefined ? settings.senderEmail.trim() : (existing?.sender_email || ''),
-    settings.senderName !== undefined ? settings.senderName.trim() : (existing?.sender_name || 'Easyworks'),
-    settings.isActive !== undefined ? (settings.isActive ? 1 : 0) : (existing?.is_active ?? 1),
-    now
-  );
+  // Password resolution
+  let newPass = '';
+  if (settings.smtpPass && !settings.smtpPass.includes('••••') && settings.smtpPass.trim().length > 0) {
+    newPass = settings.smtpPass.trim();
+  } else if (existing?.smtp_pass && existing.smtp_pass.length > 0) {
+    newPass = existing.smtp_pass;
+  } else if (process.env.SMTP_PASS || process.env.SMTP_PASSWORD) {
+    newPass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD)!.trim();
+  }
+
+  // Automatic cleanup of Google App Password spacing if 16-character grouped format is detected
+  if ((host.toLowerCase().includes('gmail') || user.toLowerCase().includes('@gmail.com')) && /^[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}$/i.test(newPass)) {
+    newPass = newPass.replace(/\s+/g, '');
+  }
+
+  // Save to database inside immediate transaction
+  runInTransaction(() => {
+    db.prepare(`
+      INSERT INTO email_settings (
+        id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
+        sender_email, sender_name, email_from, email_from_name, is_active, updated_at
+      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider = excluded.provider,
+        smtp_host = excluded.smtp_host,
+        smtp_port = excluded.smtp_port,
+        smtp_user = excluded.smtp_user,
+        smtp_pass = excluded.smtp_pass,
+        smtp_secure = excluded.smtp_secure,
+        sender_email = excluded.sender_email,
+        sender_name = excluded.sender_name,
+        email_from = excluded.email_from,
+        email_from_name = excluded.email_from_name,
+        is_active = 1,
+        updated_at = excluded.updated_at
+    `).run(
+      settings.provider || existing?.provider || 'smtp',
+      host,
+      port,
+      user,
+      newPass,
+      secure,
+      senderEmail,
+      senderName,
+      senderEmail,
+      senderName,
+      now
+    );
+  });
+
+  // Reload and confirm internally that configuration was persisted
+  const reloaded = getActiveEmailSettings();
+  if (!reloaded) {
+    throw new Error('Database error: Unable to reload email settings after save.');
+  }
 
   return getEmailSettings();
 }

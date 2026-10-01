@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getEmailSettings,
   updateEmailSettings,
+  getActiveEmailSettings,
   verifyDeveloperSessionToken,
 } from '@/lib/db/database';
 import { safeReadBody, withApiRouteHandler } from '@/lib/api/server';
@@ -35,6 +36,7 @@ export const GET = withApiRouteHandler('GET /api/developer/email/settings', asyn
           sender: activeConfig.senderEmail || null,
           source: activeConfig.source,
         },
+        diagnostics: activeConfig.diagnostics,
       },
       { status: 200 }
     );
@@ -64,6 +66,22 @@ export const POST = withApiRouteHandler('POST /api/developer/email/settings', as
     }
 
     const body = parsed.body || {};
+
+    // Validate required fields (Requirement 4)
+    if (!body.smtpHost || !String(body.smtpHost).trim()) {
+      return NextResponse.json(
+        { success: false, error: 'SMTP Host is required.' },
+        { status: 400 }
+      );
+    }
+    if (!body.smtpUser || !String(body.smtpUser).trim()) {
+      return NextResponse.json(
+        { success: false, error: 'SMTP Username is required.' },
+        { status: 400 }
+      );
+    }
+
+    // Save to database & activate
     const updated = updateEmailSettings({
       provider: body.provider || 'smtp',
       smtpHost: body.smtpHost,
@@ -71,23 +89,48 @@ export const POST = withApiRouteHandler('POST /api/developer/email/settings', as
       smtpUser: body.smtpUser,
       smtpPass: body.smtpPass,
       smtpSecure: Boolean(body.smtpSecure),
-      senderEmail: body.senderEmail,
+      senderEmail: body.senderEmail || body.smtpUser,
       senderName: body.senderName || 'Easyworks',
-      isActive: body.isActive !== undefined ? Boolean(body.isActive) : true,
+      isActive: true,
     });
+
+    // Reload configuration from database & confirm internally that host, user, and pass exist
+    const reloaded = getActiveEmailSettings();
+    if (!reloaded || !reloaded.smtp_host || !reloaded.smtp_user || !reloaded.smtp_pass) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'CONFIG_INCOMPLETE',
+          message: 'Saved configuration is incomplete. Please ensure SMTP Host, User, and Password are provided.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const activeConfig = getEmailConfig();
 
     return NextResponse.json(
       {
         success: true,
         message: 'Email provider configuration saved successfully.',
         settings: updated,
+        activeConfig: {
+          isConfigured: activeConfig.isConfigured,
+          provider: activeConfig.provider,
+          host: activeConfig.smtpHost || null,
+          port: activeConfig.smtpPort || null,
+          user: activeConfig.smtpUser ? activeConfig.smtpUser.replace(/(?<=^.).*(?=@)/, '***') : null,
+          sender: activeConfig.senderEmail || null,
+          source: activeConfig.source,
+        },
+        diagnostics: activeConfig.diagnostics,
       },
       { status: 200 }
     );
   } catch (error: any) {
     return NextResponse.json(
       { success: false, error: error.message || 'Failed to save email settings' },
-      { status: 500 }
+      { status: 400 }
     );
   }
 });
