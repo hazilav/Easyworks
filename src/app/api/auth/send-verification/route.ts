@@ -8,7 +8,7 @@ import {
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { safeReadBody, withApiRouteHandler } from '@/lib/api/server';
-import { sendOtpEmail, logOtpAudit } from '@/lib/email/emailService';
+import { sendOtpEmail, logOtpAudit, getEmailProviderConfig } from '@/lib/email/emailService';
 
 export const POST = withApiRouteHandler('POST /api/auth/send-verification', async (req: NextRequest) => {
   const requestId = 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
@@ -165,7 +165,48 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
       );
     }
 
-    // 4. Generate verification OTP & store SHA-256 hash in database
+    // 4. Resolve email provider configuration
+    const emailConfig = getEmailProviderConfig();
+
+    // Diagnostic Telemetry (Requirement 6)
+    console.log(`[EMAIL_CONFIG_CHECK] ${JSON.stringify({
+      requestId,
+      source: emailConfig.diagnostics.source,
+      smtpHostConfigured: emailConfig.diagnostics.smtpHostConfigured,
+      smtpUserConfigured: emailConfig.diagnostics.smtpUserConfigured,
+      smtpPasswordConfigured: emailConfig.diagnostics.smtpPasswordConfigured,
+      senderConfigured: emailConfig.diagnostics.senderConfigured,
+      isConfigured: emailConfig.isConfigured,
+      databaseConfigurationId: emailConfig.databaseConfigurationId,
+    })}`);
+
+    if (!emailConfig.isConfigured) {
+      // Audit Logging (Requirement 7)
+      console.error(`[OTP_AUDIT] ${JSON.stringify({
+        requestId,
+        route: '/api/auth/send-verification',
+        emailConfigLoaded: false,
+        emailConfigSource: emailConfig.diagnostics.source,
+        databaseConfigurationId: emailConfig.databaseConfigurationId,
+        emailProviderResponseStatus: 'FAILED',
+        errorCode: 'EMAIL_CONFIG_MISSING',
+        error: 'Email service is not configured. Please configure SMTP credentials in Developer Settings or environment variables.',
+        timestamp: new Date().toISOString(),
+      })}`);
+
+      // Strict Error Handling (Requirement 8)
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'EMAIL_CONFIG_MISSING',
+          message: 'Email service is not configured. Please configure SMTP credentials in Developer Settings or environment variables.',
+          requestId,
+        },
+        { status: 502 }
+      );
+    }
+
+    // 5. Generate verification OTP & store SHA-256 hash in database
     const { code, expiresAt, signupSessionId: sessionId } = createVerificationCode(
       normalizedTarget,
       channel,
@@ -180,32 +221,55 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
       details: 'Hashed OTP stored with 10-minute expiry',
     });
 
-    // 5. Dispatch OTP through email provider (Only return success after provider accepts)
-    if (channel === 'EMAIL') {
-      try {
-        await sendOtpEmail(normalizedTarget, code, requestId);
-      } catch (sendError: any) {
-        logOtpAudit({
-          requestId,
-          emailDomain: domain,
-          stage: 'EMAIL_SEND',
-          status: 'FAILURE',
-          error: sendError.message || 'Email provider failed to send message',
-        });
+    // 6. Dispatch OTP through email provider (Only return success after provider accepts)
+    console.log(`[OTP_AUDIT] ${JSON.stringify({
+      requestId,
+      route: '/api/auth/send-verification',
+      emailConfigLoaded: true,
+      emailConfigSource: emailConfig.diagnostics.source,
+      databaseConfigurationId: emailConfig.databaseConfigurationId,
+      emailProviderResponseStatus: 'PENDING',
+      timestamp: new Date().toISOString(),
+    })}`);
 
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'EMAIL_SEND_FAILED',
-            error: 'EMAIL_SEND_FAILED',
-            message: sendError.code === 'EMAIL_CONFIG_MISSING'
-              ? 'Email service is not configured. Please configure SMTP credentials in Developer Settings or environment variables.'
-              : (sendError.message || 'Email provider failed to deliver verification code.'),
-            requestId,
-          },
-          { status: 502 }
-        );
-      }
+    let sendResult: { success: boolean; messageId?: string } | undefined;
+    try {
+      sendResult = await sendOtpEmail(normalizedTarget, code, requestId);
+      console.log(`[OTP_AUDIT] ${JSON.stringify({
+        requestId,
+        route: '/api/auth/send-verification',
+        emailConfigLoaded: true,
+        emailConfigSource: emailConfig.diagnostics.source,
+        databaseConfigurationId: emailConfig.databaseConfigurationId,
+        emailProviderResponseStatus: 'ACCEPTED',
+        messageId: sendResult?.messageId,
+        timestamp: new Date().toISOString(),
+      })}`);
+    } catch (sendError: any) {
+      const safeErrorMessage = (sendError.message || 'Email provider failed to deliver verification code.')
+        .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED]');
+
+      console.error(`[OTP_AUDIT] ${JSON.stringify({
+        requestId,
+        route: '/api/auth/send-verification',
+        emailConfigLoaded: true,
+        emailConfigSource: emailConfig.diagnostics.source,
+        databaseConfigurationId: emailConfig.databaseConfigurationId,
+        emailProviderResponseStatus: 'FAILED',
+        errorCode: sendError.code || 'EMAIL_SEND_FAILED',
+        error: safeErrorMessage,
+        timestamp: new Date().toISOString(),
+      })}`);
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'EMAIL_SEND_FAILED',
+          message: safeErrorMessage,
+          requestId,
+        },
+        { status: 502 }
+      );
     }
 
     // 6. Return standard success response

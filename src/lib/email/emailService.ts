@@ -21,6 +21,7 @@ export interface EmailProviderConfig {
   senderName: string;
   isConfigured: boolean;
   source: 'database' | 'environment' | 'none';
+  databaseConfigurationId?: string;
   diagnostics: EmailDiagnostics;
 }
 
@@ -59,13 +60,28 @@ export function logOtpAudit(entry: {
 }
 
 /**
- * Resolves active email provider configuration.
+ * Parses RFC 5322 email string (e.g. "Name <email@example.com>" or "email@example.com")
+ */
+export function parseEmailAddress(raw: string): { name: string; email: string } {
+  const trimmed = (raw || '').trim();
+  const match = trimmed.match(/^(?:["']?([^"']*)["']?\s*)?<([^>]+)>$/);
+  if (match) {
+    return {
+      name: (match[1] || '').trim(),
+      email: (match[2] || '').trim(),
+    };
+  }
+  return { name: '', email: trimmed };
+}
+
+/**
+ * Single authoritative email provider configuration resolver.
  * Priority:
- * 1. Active database `email_settings` table record
+ * 1. Active database `email_settings` table record (is_active = 1)
  * 2. Environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM)
  * 3. None (unconfigured)
  */
-export function getEmailConfig(): EmailProviderConfig {
+export function getEmailProviderConfig(): EmailProviderConfig {
   // 1. Fetch active settings from SQLite database
   let settings: ActiveEmailSettings | null = null;
   try {
@@ -74,34 +90,95 @@ export function getEmailConfig(): EmailProviderConfig {
     console.error('[emailService] Error loading active email_settings from database:', err);
   }
 
-  // 2. Resolve credentials using priority: Database -> Environment
-  const host = (settings?.smtp_host || settings?.smtpHost || process.env.SMTP_HOST || '').trim();
-  const port = Number(settings?.smtp_port || settings?.smtpPort || process.env.SMTP_PORT) || 587;
-  const user = (settings?.smtp_user || settings?.smtpUser || process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
-  let pass = (settings?.smtp_pass || settings?.smtpPass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
+  const dbHost = (settings?.smtp_host || settings?.smtpHost || '').trim();
+  const dbUser = (settings?.smtp_user || settings?.smtpUser || '').trim();
+  const dbPass = (settings?.smtp_pass || settings?.smtpPass || '').trim();
+  const dbPort = Number(settings?.smtp_port || settings?.smtpPort) || 587;
+  const dbSecure = settings?.smtp_secure ?? settings?.smtpSecure;
+  const dbSender = (settings?.email_from || settings?.sender_email || settings?.senderEmail || '').trim();
+  const dbName = (settings?.email_from_name || settings?.sender_name || settings?.senderName || '').trim();
+  const isDbActive = Boolean(settings && (settings.is_active === true || settings.isActive === true));
 
-  // If host or user is Gmail, automatically strip spaces from 16-character Google App Passwords
+  // 2. Resolve environment variables
+  const envHost = (process.env.SMTP_HOST || '').trim();
+  const envPort = Number(process.env.SMTP_PORT) || 587;
+  const envUser = (process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
+  const envPass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
+  const envSender = (process.env.EMAIL_FROM || process.env.SENDER_EMAIL || '').trim();
+  const envName = (process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || '').trim();
+
+  // 3. Determine source and resolve fields
+  // Database takes precedence if active and has host + user + (dbPass or envPass)
+  const hasDbConfig = Boolean(isDbActive && dbHost && dbUser && (dbPass || envPass));
+  const hasEnvConfig = Boolean(envHost && envUser && envPass);
+
+  let source: 'DATABASE' | 'ENVIRONMENT' | 'NONE' = 'NONE';
+  let databaseConfigurationId: string | undefined = undefined;
+  let provider: 'smtp' | 'resend' | 'sendgrid' = 'smtp';
+  let host = '';
+  let port = 587;
+  let user = '';
+  let pass = '';
+  let secure = false;
+  let rawSenderEmail = '';
+  let rawSenderName = '';
+
+  if (hasDbConfig) {
+    source = 'DATABASE';
+    databaseConfigurationId = settings?.id || 'default';
+    provider = (settings?.provider as any) || 'smtp';
+    host = dbHost;
+    port = dbPort;
+    user = dbUser;
+    pass = dbPass || envPass;
+    secure = dbSecure ?? (port === 465);
+    rawSenderEmail = dbSender || user;
+    rawSenderName = dbName || envName || 'Easyworks';
+  } else if (hasEnvConfig) {
+    source = 'ENVIRONMENT';
+    provider = 'smtp';
+    host = envHost;
+    port = envPort;
+    user = envUser;
+    pass = envPass;
+    secure = process.env.SMTP_SECURE === 'true' || port === 465;
+    rawSenderEmail = envSender || user;
+    rawSenderName = envName || 'Easyworks';
+  } else {
+    source = 'NONE';
+    host = dbHost || envHost;
+    port = dbPort || envPort;
+    user = dbUser || envUser;
+    pass = dbPass || envPass;
+    secure = (dbSecure ?? (process.env.SMTP_SECURE === 'true' || port === 465)) || false;
+    rawSenderEmail = dbSender || envSender || user;
+    rawSenderName = dbName || envName || 'Easyworks';
+    if (settings && (dbHost || dbUser)) {
+      databaseConfigurationId = settings.id || 'default';
+    }
+  }
+
+  // Automatic Google App Password whitespace stripping
   if (
     (host.toLowerCase().includes('gmail') || user.toLowerCase().includes('@gmail.com')) &&
-    /^[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}\s+[a-z]{4}$/i.test(pass)
+    pass
   ) {
+    // Strip all internal whitespace from Google App Passwords
     pass = pass.replace(/\s+/g, '');
   }
 
-  const secure = settings?.smtp_secure ?? settings?.smtpSecure ?? (process.env.SMTP_SECURE === 'true' || port === 465);
-  const from = (settings?.email_from || settings?.sender_email || settings?.senderEmail || process.env.EMAIL_FROM || process.env.SENDER_EMAIL || user).trim();
-  const fromName = (settings?.email_from_name || settings?.sender_name || settings?.senderName || process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks').trim();
-
-  // Check which source provided credentials
-  const hasDb = Boolean(settings && (settings.smtp_host || settings.smtpHost) && (settings.smtp_user || settings.smtpUser));
-  const hasEnv = Boolean(process.env.SMTP_HOST && (process.env.SMTP_USER || process.env.SMTP_USERNAME));
-  const source: 'DATABASE' | 'ENVIRONMENT' | 'NONE' = hasDb ? 'DATABASE' : hasEnv ? 'ENVIRONMENT' : 'NONE';
+  // Parse sender email and name to ensure no double-wrapping (e.g., if "Easyworks <email>" is in sender_email)
+  const parsedSender = parseEmailAddress(rawSenderEmail);
+  const senderEmail = parsedSender.email || rawSenderEmail || user;
+  const senderName = rawSenderName && rawSenderName !== 'Easyworks'
+    ? rawSenderName
+    : (parsedSender.name || rawSenderName || 'Easyworks');
 
   const smtpHostConfigured = Boolean(host);
   const smtpUserConfigured = Boolean(user);
   const smtpPasswordConfigured = Boolean(pass);
-  const senderConfigured = Boolean(from);
-  const isConfigured = Boolean(host && user && pass);
+  const senderConfigured = Boolean(senderEmail);
+  const isConfigured = Boolean(smtpHostConfigured && smtpUserConfigured && smtpPasswordConfigured);
 
   const diagnostics: EmailDiagnostics = {
     source,
@@ -112,18 +189,26 @@ export function getEmailConfig(): EmailProviderConfig {
   };
 
   return {
-    provider: (settings?.provider as any) || 'smtp',
+    provider,
     smtpHost: host,
     smtpPort: port,
     smtpUser: user,
     smtpPass: pass,
     smtpSecure: secure,
-    senderEmail: from || user,
-    senderName: fromName || 'Easyworks',
+    senderEmail,
+    senderName,
     isConfigured,
     source: (source.toLowerCase() as 'database' | 'environment' | 'none'),
+    databaseConfigurationId,
     diagnostics,
   };
+}
+
+/**
+ * Backward compatibility alias for getEmailProviderConfig()
+ */
+export function getEmailConfig(): EmailProviderConfig {
+  return getEmailProviderConfig();
 }
 
 /**
@@ -170,7 +255,7 @@ export async function testEmailConnection(): Promise<{
     source: string;
   };
 }> {
-  const config = getEmailConfig();
+  const config = getEmailProviderConfig();
 
   if (!config.isConfigured) {
     const missing: string[] = [];
@@ -248,7 +333,7 @@ export async function sendOtpEmail(
   requestId: string
 ): Promise<{ success: boolean; messageId?: string }> {
   const domain = extractDomain(toEmail);
-  const config = getEmailConfig();
+  const config = getEmailProviderConfig();
 
   logOtpAudit({
     requestId,
@@ -440,7 +525,7 @@ export async function sendDeveloperTestEmail(
     };
   }
 
-  const config = getEmailConfig();
+  const config = getEmailProviderConfig();
   const transporter = createTransporter(config);
 
   try {

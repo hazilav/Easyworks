@@ -19,6 +19,27 @@ import { safeFetchJson } from '@/lib/api/client';
 
 type SignupStep = 'details' | 'verify_email' | 'success';
 
+function getFriendlyErrorMessage(
+  data: any,
+  fallbackError?: string,
+  defaultMsg: string = 'An error occurred while creating your account.'
+): string {
+  const errCode = data?.error || data?.code;
+  if (errCode === 'EMAIL_CONFIG_MISSING') {
+    return 'Email service is temporarily unavailable. Please contact support or try again later.';
+  }
+  if (errCode === 'EMAIL_SEND_FAILED') {
+    return 'Failed to send verification code. Please check your email address and try again.';
+  }
+  if (errCode === 'RATE_LIMITED') {
+    return data?.message || 'Please wait before requesting another verification code.';
+  }
+  if (errCode === 'EMAIL_ALREADY_REGISTERED') {
+    return 'An account with this email already exists. Please log in.';
+  }
+  return data?.message || data?.error || fallbackError || defaultMsg;
+}
+
 export default function AuthModal() {
   const { authModalOpen, setAuthModalOpen, authMode, setAuthMode, login } = useApp();
 
@@ -114,7 +135,7 @@ export default function AuthModal() {
       });
 
       if (!ok) {
-        throw new Error(data?.message || data?.error || error || 'Failed to send email verification code.');
+        throw new Error(getFriendlyErrorMessage(data, error, 'Failed to send email verification code.'));
       }
 
       if (data?.signupSessionId) {
@@ -192,7 +213,9 @@ export default function AuthModal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ target: email.trim(), channel: 'EMAIL', signupSessionId }),
       });
-      if (!ok) throw new Error(data?.message || data?.error || error || 'Failed to resend code');
+      if (!ok) {
+        throw new Error(getFriendlyErrorMessage(data, error, 'Failed to resend code'));
+      }
       if (data?.signupSessionId) setSignupSessionId(data.signupSessionId);
       startResendCountdown();
     } catch (err: any) {

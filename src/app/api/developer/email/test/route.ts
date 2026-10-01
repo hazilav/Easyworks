@@ -5,6 +5,7 @@ import { safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 import {
   testEmailConnection,
   sendDeveloperTestEmail,
+  getEmailProviderConfig,
   getEmailConfig,
 } from '@/lib/email/emailService';
 
@@ -34,7 +35,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
     // 1. Connection-only check (Requirement 5 & 8)
     if (action === 'test_connection' || !testEmail) {
       const conn = await testEmailConnection();
-      const config = getEmailConfig();
+      const config = getEmailProviderConfig();
 
       return NextResponse.json(
         {
@@ -52,6 +53,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
             user: config.smtpUser ? config.smtpUser.replace(/(?<=^.).*(?=@)/, '***') : null,
             sender: config.senderEmail || null,
             source: config.source,
+            databaseConfigurationId: config.databaseConfigurationId || null,
           },
           requestId,
         },
@@ -90,7 +92,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/test', async 
       { status: 200 }
     );
   } catch (error: any) {
-    const config = getEmailConfig();
+    const config = getEmailProviderConfig();
     return NextResponse.json(
       {
         success: false,

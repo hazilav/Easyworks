@@ -19,6 +19,7 @@ import {
 } from '../src/lib/email/emailService.ts';
 
 const db = getDatabase();
+const originalEmailRow = db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get();
 
 async function runOtpEmailVerification() {
   console.log('===============================================================');
@@ -258,7 +259,41 @@ async function runOtpEmailVerification() {
   db.prepare('DELETE FROM subscriptions WHERE user_id = ?').run(customerUserId);
   db.prepare('DELETE FROM businesses WHERE user_id = ?').run(customerUserId);
   db.prepare('DELETE FROM users WHERE id = ?').run(customerUserId);
-  db.prepare('DELETE FROM verification_codes WHERE target = ?').run(prospectiveEmail.toLowerCase());
+  if (originalEmailRow) {
+    db.prepare(`
+      INSERT INTO email_settings (
+        id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
+        sender_email, sender_name, email_from, email_from_name, is_active, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider = excluded.provider,
+        smtp_host = excluded.smtp_host,
+        smtp_port = excluded.smtp_port,
+        smtp_user = excluded.smtp_user,
+        smtp_pass = excluded.smtp_pass,
+        smtp_secure = excluded.smtp_secure,
+        sender_email = excluded.sender_email,
+        sender_name = excluded.sender_name,
+        email_from = excluded.email_from,
+        email_from_name = excluded.email_from_name,
+        is_active = excluded.is_active,
+        updated_at = excluded.updated_at
+    `).run(
+      originalEmailRow.id,
+      originalEmailRow.provider,
+      originalEmailRow.smtp_host,
+      originalEmailRow.smtp_port,
+      originalEmailRow.smtp_user,
+      originalEmailRow.smtp_pass,
+      originalEmailRow.smtp_secure,
+      originalEmailRow.sender_email,
+      originalEmailRow.sender_name,
+      originalEmailRow.email_from,
+      originalEmailRow.email_from_name,
+      originalEmailRow.is_active,
+      originalEmailRow.updated_at
+    );
+  }
   console.log('  ✔ Test customer purged. Database clean.');
 
   console.log('\n===============================================================');

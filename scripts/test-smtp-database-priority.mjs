@@ -14,6 +14,7 @@ import {
 } from '../src/lib/email/emailService.ts';
 
 const db = getDatabase();
+const originalRow = db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get();
 
 async function runTests() {
   console.log('====================================================================');
@@ -187,9 +188,46 @@ async function runTests() {
     assert(Boolean(otpResult.messageId), `sendOtpEmail() confirmed delivery with messageId: ${otpResult.messageId}`);
   }
 
-  // Clean up test configuration in DB
-  db.prepare('DELETE FROM email_settings').run();
-  console.log('\n  ✔ Database cleaned for next use.');
+  // Clean up test configuration in DB and restore original row
+  if (originalRow) {
+    db.prepare(`
+      INSERT INTO email_settings (
+        id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
+        sender_email, sender_name, email_from, email_from_name, is_active, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider = excluded.provider,
+        smtp_host = excluded.smtp_host,
+        smtp_port = excluded.smtp_port,
+        smtp_user = excluded.smtp_user,
+        smtp_pass = excluded.smtp_pass,
+        smtp_secure = excluded.smtp_secure,
+        sender_email = excluded.sender_email,
+        sender_name = excluded.sender_name,
+        email_from = excluded.email_from,
+        email_from_name = excluded.email_from_name,
+        is_active = excluded.is_active,
+        updated_at = excluded.updated_at
+    `).run(
+      originalRow.id,
+      originalRow.provider,
+      originalRow.smtp_host,
+      originalRow.smtp_port,
+      originalRow.smtp_user,
+      originalRow.smtp_pass,
+      originalRow.smtp_secure,
+      originalRow.sender_email,
+      originalRow.sender_name,
+      originalRow.email_from,
+      originalRow.email_from_name,
+      originalRow.is_active,
+      originalRow.updated_at
+    );
+    console.log('\n  ✔ Original database row restored.');
+  } else {
+    db.prepare('DELETE FROM email_settings').run();
+    console.log('\n  ✔ Database cleaned for next use.');
+  }
 
   console.log('\n====================================================================');
   console.log(`TOTAL TESTS: ${passed + failed} | PASSED: ${passed} | FAILED: ${failed}`);

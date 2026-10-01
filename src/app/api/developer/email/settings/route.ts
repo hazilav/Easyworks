@@ -6,7 +6,7 @@ import {
   verifyDeveloperSessionToken,
 } from '@/lib/db/database';
 import { safeReadBody, withApiRouteHandler } from '@/lib/api/server';
-import { getEmailConfig } from '@/lib/email/emailService';
+import { getEmailProviderConfig, getEmailConfig } from '@/lib/email/emailService';
 
 export const GET = withApiRouteHandler('GET /api/developer/email/settings', async (req: NextRequest) => {
   try {
@@ -21,7 +21,7 @@ export const GET = withApiRouteHandler('GET /api/developer/email/settings', asyn
     }
 
     const settings = getEmailSettings();
-    const activeConfig = getEmailConfig();
+    const activeConfig = getEmailProviderConfig();
 
     return NextResponse.json(
       {
@@ -35,6 +35,7 @@ export const GET = withApiRouteHandler('GET /api/developer/email/settings', asyn
           user: activeConfig.smtpUser ? activeConfig.smtpUser.replace(/(?<=^.).*(?=@)/, '***') : null,
           sender: activeConfig.senderEmail || null,
           source: activeConfig.source,
+          databaseConfigurationId: activeConfig.databaseConfigurationId || null,
         },
         diagnostics: activeConfig.diagnostics,
       },
@@ -107,7 +108,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/settings', as
       );
     }
 
-    const activeConfig = getEmailConfig();
+    const activeConfig = getEmailProviderConfig();
 
     return NextResponse.json(
       {
@@ -122,6 +123,7 @@ export const POST = withApiRouteHandler('POST /api/developer/email/settings', as
           user: activeConfig.smtpUser ? activeConfig.smtpUser.replace(/(?<=^.).*(?=@)/, '***') : null,
           sender: activeConfig.senderEmail || null,
           source: activeConfig.source,
+          databaseConfigurationId: activeConfig.databaseConfigurationId || null,
         },
         diagnostics: activeConfig.diagnostics,
       },

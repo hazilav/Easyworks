@@ -1856,6 +1856,7 @@ export interface EmailSettingsRecord {
 
 export interface ActiveEmailSettings {
   id: string;
+  databaseConfigurationId?: string;
   provider: 'smtp' | 'resend' | 'sendgrid';
   smtp_host: string;
   smtp_port: number;
@@ -1908,10 +1909,11 @@ export function getActiveEmailSettings(): ActiveEmailSettings | null {
     const secure = Boolean(row.smtp_secure || row.secure);
     const sender = String(row.email_from || row.sender_email || row.from || user).trim();
     const name = String(row.email_from_name || row.sender_name || row.from_name || 'Easyworks').trim();
-    const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true;
+    const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true || (row.is_active == null && Boolean(host && user));
 
     return {
       id: row.id || 'default',
+      databaseConfigurationId: row.id || 'default',
       provider: (row.provider as any) || 'smtp',
       smtp_host: host,
       smtp_port: port,
