@@ -453,3 +453,47 @@ export interface DeveloperCustomerSummary {
   eligibilityStatus?: TrialEligibilityStatus;
 }
 
+export type SmsProviderType = 'twilio' | 'msg91' | 'sns' | 'vonage' | 'generic_rest' | 'test';
+
+export interface SmsSettingsRecord {
+  id: string;
+  provider: SmsProviderType;
+  apiUrl?: string;
+  accountSid?: string;
+  authToken?: string;
+  senderId?: string;
+  messageTemplate?: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface ActiveSmsSettings {
+  id: string;
+  provider: SmsProviderType;
+  api_url?: string;
+  account_sid?: string;
+  auth_token?: string;
+  sender_id?: string;
+  message_template?: string;
+  is_active: boolean;
+  updated_at: string;
+  apiUrl?: string;
+  accountSid?: string;
+  authToken?: string;
+  rawAuthToken?: string;
+  senderId?: string;
+  messageTemplate?: string;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface SmsDiagnostics {
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE';
+  providerConfigured: boolean;
+  apiCredentialsConfigured: boolean;
+  senderConfigured: boolean;
+  providerName: string;
+  lastProviderResponse?: 'ACCEPTED' | 'FAILED' | 'NONE';
+  lastError?: string | null;
+}
+

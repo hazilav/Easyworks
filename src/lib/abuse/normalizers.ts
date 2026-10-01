@@ -55,12 +55,25 @@ export function normalizePhone(rawPhone: string, defaultCountry = '+91'): string
     // If 10 digits, assume default country
     if (cleaned.length === 10) {
       cleaned = defaultCountry + cleaned;
+    } else if (cleaned.length === 12 && cleaned.startsWith('91')) {
+      cleaned = '+' + cleaned;
     } else {
       cleaned = '+' + cleaned;
     }
   }
 
   return cleaned;
+}
+
+/**
+ * Validates whether a normalized phone number is a legitimate Indian mobile number.
+ * Valid Indian mobile numbers are 10 digits starting with 6, 7, 8, or 9.
+ * In E.164 format: +91[6-9]XXXXXXXXX (total 13 characters).
+ */
+export function isValidIndianMobile(rawPhone: string): boolean {
+  if (!rawPhone) return false;
+  const normalized = normalizePhone(rawPhone);
+  return /^\+91[6-9]\d{9}$/.test(normalized);
 }
 
 /**

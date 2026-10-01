@@ -17,9 +17,12 @@ import {
   DeveloperStats,
   DeveloperCustomerSummary,
   ActivityLog,
+  SmsSettingsRecord,
+  ActiveSmsSettings,
+  SmsProviderType,
 } from '@/types';
 import { addCalendarMonths, evaluateSubscriptionStatus } from '../billing/dateUtils';
-import { normalizeEmail, normalizePhone, normalizeBusinessName, extractDomain } from '../abuse/normalizers';
+import { normalizeEmail, normalizePhone, normalizeBusinessName, extractDomain, isValidIndianMobile } from '../abuse/normalizers';
 import { isDisposableEmail } from '../abuse/disposableEmails';
 
 /**
@@ -269,6 +272,18 @@ function initDatabase(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS sms_settings (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      provider TEXT NOT NULL DEFAULT 'twilio',
+      api_url TEXT,
+      account_sid TEXT,
+      auth_token TEXT,
+      sender_id TEXT,
+      message_template TEXT DEFAULT 'Easyworks verification code: {{code}}\n\nThis code expires in 10 minutes. If you did not request this code, ignore this message.',
+      is_active INTEGER DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS manual_payment_requests (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -433,6 +448,9 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE subscriptions ADD COLUMN pdf_downloads_used INTEGER NOT NULL DEFAULT 0;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN signup_session_id TEXT;'); } catch {}
   try { db.exec('ALTER TABLE verification_codes ADD COLUMN code_hash TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE verification_codes ADD COLUMN request_id TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE verification_codes ADD COLUMN phone_number TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE verification_codes ADD COLUMN otp_hash TEXT;'); } catch {}
 
   // Safe migrations for email_settings table
   try { db.exec('ALTER TABLE email_settings ADD COLUMN email_from TEXT;'); } catch {}
@@ -440,6 +458,14 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE email_settings ADD COLUMN sender_email TEXT;'); } catch {}
   try { db.exec('ALTER TABLE email_settings ADD COLUMN sender_name TEXT;'); } catch {}
   try { db.exec('ALTER TABLE email_settings ADD COLUMN is_active INTEGER DEFAULT 1;'); } catch {}
+
+  // Safe migrations for sms_settings table
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN api_url TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN account_sid TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN auth_token TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN sender_id TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN message_template TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE sms_settings ADD COLUMN is_active INTEGER DEFAULT 1;'); } catch {}
 
   // Safe migrations for businesses table
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_url TEXT;'); } catch {}
@@ -2065,6 +2091,150 @@ export function updateEmailSettings(
   return getEmailSettings();
 }
 
+/**
+ * Returns active SMS settings from the sms_settings table.
+ */
+export function getActiveSmsSettings(): ActiveSmsSettings | null {
+  const db = getDatabase();
+  try {
+    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sms_settings'").get();
+    if (!tableCheck) return null;
+
+    const row = (db.prepare(`
+      SELECT * FROM sms_settings 
+      WHERE is_active = 1 OR is_active = '1'
+      ORDER BY updated_at DESC 
+      LIMIT 1
+    `).get() || db.prepare("SELECT * FROM sms_settings WHERE id = 'default'").get()) as any;
+
+    if (!row) return null;
+
+    const provider = (row.provider as SmsProviderType) || 'twilio';
+    const apiUrl = String(row.api_url || '').trim();
+    const accountSid = String(row.account_sid || '').trim();
+    const authToken = String(row.auth_token || '').trim();
+    const senderId = String(row.sender_id || 'Easyworks').trim();
+    const messageTemplate = String(row.message_template || '').trim();
+    const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true;
+
+    return {
+      id: row.id || 'default',
+      provider,
+      api_url: apiUrl,
+      account_sid: accountSid,
+      auth_token: authToken,
+      sender_id: senderId,
+      message_template: messageTemplate,
+      is_active: active,
+      updated_at: row.updated_at || new Date().toISOString(),
+      apiUrl,
+      accountSid,
+      authToken,
+      rawAuthToken: authToken,
+      senderId,
+      messageTemplate,
+      isActive: active,
+      updatedAt: row.updated_at || new Date().toISOString(),
+    };
+  } catch (err) {
+    console.error('[Database] Failed to getActiveSmsSettings:', err);
+    return null;
+  }
+}
+
+/**
+ * Returns raw active SMS settings
+ */
+export function getRawSmsSettings(): ActiveSmsSettings | null {
+  return getActiveSmsSettings();
+}
+
+/**
+ * Returns SMS settings formatted for UI display with auth token masked as ••••••••
+ */
+export function getSmsSettings(): SmsSettingsRecord {
+  const active = getActiveSmsSettings();
+  if (!active || (!active.auth_token && !active.account_sid && active.provider !== 'test')) {
+    const envProvider = (process.env.SMS_PROVIDER || 'twilio').toLowerCase() as SmsProviderType;
+    const envAccountSid = process.env.TWILIO_ACCOUNT_SID || process.env.SMS_ACCOUNT_SID || '';
+    const envAuthToken = process.env.TWILIO_AUTH_TOKEN || process.env.MSG91_AUTH_KEY || process.env.SMS_AUTH_TOKEN || '';
+    const envSenderId = process.env.TWILIO_FROM || process.env.MSG91_SENDER_ID || process.env.SMS_SENDER_ID || 'Easyworks';
+    const envApiUrl = process.env.SMS_API_URL || '';
+    const envTemplate = process.env.SMS_TEMPLATE || '';
+
+    return {
+      id: 'default',
+      provider: envProvider,
+      apiUrl: envApiUrl,
+      accountSid: envAccountSid,
+      authToken: envAuthToken ? '••••••••' : '',
+      senderId: envSenderId,
+      messageTemplate: envTemplate,
+      isActive: Boolean(envAuthToken || (envProvider === 'generic_rest' && envApiUrl) || envProvider === 'test'),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return {
+    id: active.id,
+    provider: active.provider,
+    apiUrl: active.api_url,
+    accountSid: active.account_sid,
+    authToken: active.auth_token ? '••••••••' : '',
+    senderId: active.sender_id,
+    messageTemplate: active.message_template,
+    isActive: active.is_active,
+    updatedAt: active.updated_at,
+  };
+}
+
+/**
+ * Saves and activates SMS configuration in sms_settings table.
+ * Preserves existing auth token if masked string •••••••• is passed.
+ */
+export function updateSmsSettings(
+  settings: Partial<SmsSettingsRecord>
+): SmsSettingsRecord {
+  const db = getDatabase();
+  const existing = getActiveSmsSettings();
+  const now = new Date().toISOString();
+
+  const provider = (settings.provider || existing?.provider || 'twilio') as SmsProviderType;
+  const apiUrl = settings.apiUrl !== undefined ? settings.apiUrl.trim() : (existing?.api_url || '');
+  const accountSid = settings.accountSid !== undefined ? settings.accountSid.trim() : (existing?.account_sid || '');
+  const senderId = settings.senderId !== undefined ? settings.senderId.trim() : (existing?.sender_id || 'Easyworks');
+  const messageTemplate = settings.messageTemplate !== undefined ? settings.messageTemplate.trim() : (existing?.message_template || '');
+  const isActive = settings.isActive !== undefined ? (settings.isActive ? 1 : 0) : 1;
+
+  let newToken = '';
+  if (settings.authToken && !settings.authToken.includes('••••') && settings.authToken.trim().length > 0) {
+    newToken = settings.authToken.trim();
+  } else if (existing?.auth_token && existing.auth_token.length > 0) {
+    newToken = existing.auth_token;
+  } else if (process.env.TWILIO_AUTH_TOKEN || process.env.MSG91_AUTH_KEY || process.env.SMS_AUTH_TOKEN) {
+    newToken = (process.env.TWILIO_AUTH_TOKEN || process.env.MSG91_AUTH_KEY || process.env.SMS_AUTH_TOKEN)!.trim();
+  }
+
+  runInTransaction(() => {
+    db.prepare(`
+      INSERT INTO sms_settings (
+        id, provider, api_url, account_sid, auth_token, sender_id, message_template, is_active, updated_at
+      ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider = excluded.provider,
+        api_url = excluded.api_url,
+        account_sid = excluded.account_sid,
+        auth_token = excluded.auth_token,
+        sender_id = excluded.sender_id,
+        message_template = excluded.message_template,
+        is_active = excluded.is_active,
+        updated_at = excluded.updated_at
+    `).run(provider, apiUrl, accountSid, newToken, senderId, messageTemplate, isActive, now);
+  });
+
+  return getSmsSettings();
+}
+
 export function createManualPaymentRequest({
   userId,
   planId,
@@ -2444,7 +2614,8 @@ export function createOrUpdateTrialIdentity(data: {
 export function createVerificationCode(
   target: string,
   channel: 'EMAIL' | 'SMS',
-  signupSessionId?: string
+  signupSessionId?: string,
+  requestId?: string
 ): { id: string; code: string; expiresAt: string; signupSessionId: string } {
   const db = getDatabase();
   const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
@@ -2456,6 +2627,7 @@ export function createVerificationCode(
   const expiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
   const nowISO = now.toISOString();
   const sessionId = signupSessionId || 'ss_' + crypto.randomBytes(8).toString('hex');
+  const reqId = requestId || 'req_' + Date.now().toString(36);
 
   // Compute SHA-256 code hash with target salt
   const codeHash = crypto.createHash('sha256').update(code.trim() + ':' + normalizedTarget).digest('hex');
@@ -2467,11 +2639,53 @@ export function createVerificationCode(
 
   // Store ONLY the hashed OTP in the database (never the plaintext OTP)
   db.prepare(`
-    INSERT INTO verification_codes (id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-  `).run(id, normalizedTarget, channel, '[HASHED]', codeHash, sessionId, expiresAt, nowISO);
+    INSERT INTO verification_codes (
+      id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at,
+      request_id, phone_number, otp_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+  `).run(
+    id,
+    normalizedTarget,
+    channel,
+    '[HASHED]',
+    codeHash,
+    sessionId,
+    expiresAt,
+    nowISO,
+    reqId,
+    channel === 'SMS' ? normalizedTarget : null,
+    codeHash
+  );
 
   return { id, code, expiresAt, signupSessionId: sessionId };
+}
+
+/**
+ * Checks whether an active signup session already has a verified email address.
+ */
+export function hasVerifiedEmailInSession(signupSessionId: string): boolean {
+  if (!signupSessionId) return false;
+  const db = getDatabase();
+  const row = db.prepare(`
+    SELECT id FROM verification_codes
+    WHERE signup_session_id = ? AND channel = 'EMAIL' AND verified_at IS NOT NULL
+    ORDER BY created_at DESC LIMIT 1
+  `).get(signupSessionId) as any;
+  return Boolean(row?.id);
+}
+
+/**
+ * Retrieves the verified email address associated with a signup session.
+ */
+export function getVerifiedEmailInSession(signupSessionId: string): string | null {
+  if (!signupSessionId) return null;
+  const db = getDatabase();
+  const row = db.prepare(`
+    SELECT target FROM verification_codes
+    WHERE signup_session_id = ? AND channel = 'EMAIL' AND verified_at IS NOT NULL
+    ORDER BY created_at DESC LIMIT 1
+  `).get(signupSessionId) as any;
+  return row?.target ? normalizeEmail(row.target) : null;
 }
 
 /**

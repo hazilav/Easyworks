@@ -172,17 +172,11 @@ export default function AuthModal() {
           code: emailOtp.trim(),
           channel: 'EMAIL',
           signupSessionId,
-          name: name.trim(),
-          businessName: businessName.trim(),
         }),
       });
 
       if (!ok) {
         throw new Error(data?.error || error || 'Invalid verification code.');
-      }
-
-      if (data?.user?.id) {
-        setTempUserId(data.user.id);
       }
 
       setSignupStep('phone_entry');
@@ -248,8 +242,10 @@ export default function AuthModal() {
           target: phone.trim(),
           code: phoneOtp.trim(),
           channel: 'SMS',
-          userId: tempUserId,
           signupSessionId,
+          email: email.trim(),
+          name: name.trim(),
+          businessName: businessName.trim(),
         }),
       });
 
