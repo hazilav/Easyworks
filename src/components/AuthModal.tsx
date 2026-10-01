@@ -10,21 +10,17 @@ import {
   Building2,
   User,
   ArrowRight,
-  ShieldCheck,
-  Phone,
   CheckCircle2,
   AlertCircle,
-  ShieldAlert,
   KeyRound,
-  RefreshCw,
 } from 'lucide-react';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
 import { safeFetchJson } from '@/lib/api/client';
 
-type SignupStep = 'details' | 'verify_email' | 'phone_entry' | 'verify_phone' | 'eligibility_result';
+type SignupStep = 'details' | 'verify_email' | 'success';
 
 export default function AuthModal() {
-  const { authModalOpen, setAuthModalOpen, authMode, setAuthMode, login, setCurrentView } = useApp();
+  const { authModalOpen, setAuthModalOpen, authMode, setAuthMode, login } = useApp();
 
   // Basic Account Credentials
   const [name, setName] = useState('');
@@ -35,17 +31,7 @@ export default function AuthModal() {
   // Multi-step signup state
   const [signupStep, setSignupStep] = useState<SignupStep>('details');
   const [emailOtp, setEmailOtp] = useState('');
-  const [phone, setPhone] = useState('');
-  const [phoneOtp, setPhoneOtp] = useState('');
-  const [tempUserId, setTempUserId] = useState('');
   const [signupSessionId, setSignupSessionId] = useState('');
-
-  // Eligibility evaluation state
-  const [eligibilityResult, setEligibilityResult] = useState<{
-    status: 'ELIGIBLE' | 'REQUIRES_VERIFICATION' | 'REVIEW_REQUIRED' | 'NOT_ELIGIBLE';
-    message: string;
-    flagReason?: string;
-  } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,6 +158,8 @@ export default function AuthModal() {
           code: emailOtp.trim(),
           channel: 'EMAIL',
           signupSessionId,
+          name: name.trim(),
+          businessName: businessName.trim(),
         }),
       });
 
@@ -179,7 +167,13 @@ export default function AuthModal() {
         throw new Error(data?.error || error || 'Invalid verification code.');
       }
 
-      setSignupStep('phone_entry');
+      setSignupStep('success');
+
+      // Immediately activate workspace in Customer Panel
+      const resolvedUserId = data?.user?.id;
+      setTimeout(() => {
+        login(email.trim(), name.trim(), businessName.trim(), resolvedUserId);
+      }, 1200);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -187,113 +181,16 @@ export default function AuthModal() {
     }
   };
 
-  // -------------------------------------------------------------
-  // Signup Step 3: Send Phone OTP
-  // -------------------------------------------------------------
-  const handleSendPhoneOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    const cleanPhone = phone.trim();
-    if (!cleanPhone || cleanPhone.replace(/[^\d]/g, '').length < 10) {
-      setError('Please enter a valid 10-digit mobile number with country code (e.g. +91 95399 33265).');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; signupSessionId?: string }>('/api/auth/send-verification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: cleanPhone, channel: 'SMS', signupSessionId }),
-      });
-
-      if (!ok) {
-        throw new Error(data?.error || error || 'Failed to send SMS code.');
-      }
-
-      setSignupStep('verify_phone');
-      startResendCountdown();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // -------------------------------------------------------------
-  // Signup Step 4: Verify Phone OTP & Trigger Eligibility Check
-  // -------------------------------------------------------------
-  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!phoneOtp.trim() || phoneOtp.trim().length !== 6) {
-      setError('Please enter the 6-digit phone code.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; eligibility?: any; user?: any }>('/api/auth/verify-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target: phone.trim(),
-          code: phoneOtp.trim(),
-          channel: 'SMS',
-          signupSessionId,
-          email: email.trim(),
-          name: name.trim(),
-          businessName: businessName.trim(),
-        }),
-      });
-
-      if (!ok) {
-        throw new Error(data?.error || error || 'Invalid SMS code.');
-      }
-
-      // Check eligibility result
-      if (data?.eligibility) {
-        setEligibilityResult(data.eligibility);
-        setSignupStep('eligibility_result');
-
-        if (data.eligibility.status === 'ELIGIBLE') {
-          // Immediately log in
-          setTimeout(() => {
-            login(email.trim(), name.trim(), businessName.trim());
-          }, 1500);
-        }
-      } else {
-        // Fallback check
-        const { data: checkData } = await safeFetchJson<any>(`/api/auth/trial-eligibility?userId=${tempUserId}`);
-        setEligibilityResult(checkData || null);
-        setSignupStep('eligibility_result');
-
-        if (checkData?.status === 'ELIGIBLE') {
-          setTimeout(() => {
-            login(email.trim(), name.trim(), businessName.trim());
-          }, 1500);
-        }
-      }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Resend code handler
-  const handleResend = async (channel: 'EMAIL' | 'SMS') => {
+  // Resend code handler (Email only)
+  const handleResend = async () => {
     if (resendTimer > 0) return;
     setError(null);
     setLoading(true);
     try {
-      const target = channel === 'EMAIL' ? email.trim() : phone.trim();
       const { ok, data, error } = await safeFetchJson<{ success?: boolean; error?: string; message?: string; signupSessionId?: string }>('/api/auth/send-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target, channel, signupSessionId }),
+        body: JSON.stringify({ target: email.trim(), channel: 'EMAIL', signupSessionId }),
       });
       if (!ok) throw new Error(data?.message || data?.error || error || 'Failed to resend code');
       if (data?.signupSessionId) setSignupSessionId(data.signupSessionId);
@@ -521,7 +418,7 @@ export default function AuthModal() {
               <button
                 type="button"
                 disabled={resendTimer > 0}
-                onClick={() => handleResend('EMAIL')}
+                onClick={handleResend}
                 className="text-blue-600 dark:text-blue-400 font-medium hover:underline disabled:text-slate-400 cursor-pointer"
               >
                 {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend Code'}
@@ -531,207 +428,20 @@ export default function AuthModal() {
         )}
 
         {/* ------------------------------------------------------------------ */}
-        {/* Signup Mode: Step 3 Phone Entry */}
+        {/* Signup Mode: Step 3 Success & Instant Free Trial Activation */}
         {/* ------------------------------------------------------------------ */}
-        {authMode === 'signup' && signupStep === 'phone_entry' && (
-          <form onSubmit={handleSendPhoneOtp} className="space-y-4 text-xs">
-            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900 text-slate-600 dark:text-emerald-200 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Email verified successfully! Now verify your mobile number.</span>
+        {authMode === 'signup' && signupStep === 'success' && (
+          <div className="space-y-4 text-center py-4">
+            <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 mb-3 animate-in zoom-in-50 duration-200">
+              <CheckCircle2 className="w-7 h-7" />
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-zinc-300 mb-1">
-                Mobile Phone Number
-              </label>
-              <div className="relative">
-                <Phone className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="tel"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 95399 33265"
-                  className="w-full h-10 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 pl-10 pr-3.5 rounded-xl text-xs focus:outline-hidden focus:border-blue-500"
-                />
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1">
-                Exactly one 7-day free trial is permitted per verified phone number.
-              </p>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">7-Day Free Trial Activated!</h3>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1.5 px-4">
+              Welcome to Easyworks. You have full access to templates, quotations, invoices, and 2 free PDF downloads.
+            </p>
+            <div className="mt-5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300">
+              Launching your workspace...
             </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <span>{loading ? 'Sending SMS...' : 'Send SMS Verification Code'}</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </form>
-        )}
-
-        {/* ------------------------------------------------------------------ */}
-        {/* Signup Mode: Step 4 Phone OTP */}
-        {/* ------------------------------------------------------------------ */}
-        {authMode === 'signup' && signupStep === 'verify_phone' && (
-          <form onSubmit={handleVerifyPhoneOtp} className="space-y-4 text-xs">
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 text-slate-600 dark:text-blue-200 text-xs">
-              <p className="font-semibold text-blue-900 dark:text-blue-100 mb-0.5">Enter SMS Code</p>
-              We sent a 6-digit SMS verification code to <span className="font-medium text-blue-600">{phone}</span>.
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-zinc-300 mb-1">
-                6-Digit SMS Verification Code
-              </label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  maxLength={6}
-                  required
-                  value={phoneOtp}
-                  onChange={(e) => setPhoneOtp(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
-                  className="w-full h-11 text-center tracking-widest text-base font-bold bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 pl-10 pr-3.5 rounded-xl focus:outline-hidden focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <span>{loading ? 'Activating Free Trial...' : 'Verify & Activate 7-Day Free Trial'}</span>
-              <ShieldCheck className="w-4 h-4" />
-            </button>
-
-            <div className="flex justify-between items-center text-[11px] pt-1">
-              <button
-                type="button"
-                onClick={() => setSignupStep('phone_entry')}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 cursor-pointer"
-              >
-                Change Phone
-              </button>
-              <button
-                type="button"
-                disabled={resendTimer > 0}
-                onClick={() => handleResend('SMS')}
-                className="text-blue-600 dark:text-blue-400 font-medium hover:underline disabled:text-slate-400 cursor-pointer"
-              >
-                {resendTimer > 0 ? `Resend in ${resendTimer}s` : 'Resend Code'}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* ------------------------------------------------------------------ */}
-        {/* Signup Mode: Step 5 Eligibility Result Display */}
-        {/* ------------------------------------------------------------------ */}
-        {authMode === 'signup' && signupStep === 'eligibility_result' && eligibilityResult && (
-          <div className="space-y-4 text-center">
-            {eligibilityResult.status === 'ELIGIBLE' && (
-              <div className="py-3">
-                <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 mb-3">
-                  <CheckCircle2 className="w-7 h-7" />
-                </div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">7-Day Free Trial Activated!</h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1.5 px-4">
-                  Welcome to Easyworks. You have full access to templates, quotations, invoices, and 2 free PDF
-                  downloads.
-                </p>
-                <div className="mt-5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300">
-                  Launching your workspace...
-                </div>
-              </div>
-            )}
-
-            {eligibilityResult.status === 'REVIEW_REQUIRED' && (
-              <div className="py-2 text-left">
-                <div className="w-12 h-12 mx-auto rounded-full bg-amber-100 dark:bg-amber-950 flex items-center justify-center text-amber-600 mb-3">
-                  <ShieldAlert className="w-7 h-7" />
-                </div>
-                <h3 className="text-base font-bold text-center text-slate-900 dark:text-white">
-                  Trial Pending Verification Review
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 text-center mt-1 mb-4">
-                  Our automated security system flagged this registration for standard review before trial activation.
-                </p>
-
-                {eligibilityResult.flagReason && (
-                  <div className="p-3 mb-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs">
-                    <p className="font-semibold mb-1">Reason for review:</p>
-                    <p className="text-[11px] opacity-90">{eligibilityResult.flagReason}</p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <button
-                    onClick={() => {
-                      setAuthModalOpen(false);
-                      setCurrentView('pricing');
-                    }}
-                    className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer"
-                  >
-                    Subscribe Now (₹249/mo) for Instant Unlimited Access
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      login(email.trim(), name.trim(), businessName.trim());
-                      setAuthModalOpen(false);
-                    }}
-                    className="w-full h-9 bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-medium rounded-xl hover:bg-slate-200 cursor-pointer"
-                  >
-                    Continue to Dashboard (Read-Only)
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {eligibilityResult.status === 'NOT_ELIGIBLE' && (
-              <div className="py-2 text-left">
-                <div className="w-12 h-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950 flex items-center justify-center text-rose-600 mb-3">
-                  <ShieldAlert className="w-7 h-7" />
-                </div>
-                <h3 className="text-base font-bold text-center text-slate-900 dark:text-white">
-                  Free Trial Already Claimed
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 text-center mt-1 mb-4">
-                  This phone number has already been used to claim a 7-day free trial on Easyworks. Free trials are limited to one per customer/business.
-                </p>
-
-                <div className="p-3 mb-4 rounded-xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300">
-                  <p className="font-semibold text-slate-900 dark:text-white mb-1">Upgrade to Continue</p>
-                  Get unlimited quotations, invoices, templates, and up to 180 PDF downloads starting at just ₹299.
-                </div>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={() => {
-                      setAuthModalOpen(false);
-                      setCurrentView('pricing');
-                    }}
-                    className="w-full h-10 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
-                  >
-                    Select Plan (Starting at ₹299)
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setAuthMode('login');
-                      setSignupStep('details');
-                    }}
-                    className="w-full h-9 text-blue-600 dark:text-blue-400 text-xs font-medium hover:underline cursor-pointer text-center"
-                  >
-                    Sign in with your existing account
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

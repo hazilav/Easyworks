@@ -6,10 +6,9 @@ import {
   isEmailRegistered,
 } from '@/lib/db/database';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
-import { normalizeEmail, normalizePhone, isValidIndianMobile } from '@/lib/abuse/normalizers';
+import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { safeReadBody, withApiRouteHandler } from '@/lib/api/server';
 import { sendOtpEmail, logOtpAudit } from '@/lib/email/emailService';
-import { sendOtpSms } from '@/lib/sms/smsService';
 
 export const POST = withApiRouteHandler('POST /api/auth/send-verification', async (req: NextRequest) => {
   const requestId = 'req_' + Date.now().toString(36) + '_' + crypto.randomBytes(4).toString('hex');
@@ -21,21 +20,40 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
       return parsed.response;
     }
     const body = parsed.body || {};
-    const { target, channel, signupSessionId } = body;
+    const { target, signupSessionId } = body;
+    const channel = (body.channel || 'EMAIL').toUpperCase();
     cleanTarget = String(target || '').trim();
 
-    if (!cleanTarget || !channel || !['EMAIL', 'SMS'].includes(channel)) {
+    if (!cleanTarget) {
       logOtpAudit({
         requestId,
         stage: 'VALIDATE_REQUEST',
         status: 'FAILURE',
-        error: 'Missing valid target or channel',
+        error: 'Missing target email address',
       });
       return NextResponse.json(
         {
           success: false,
           error: 'BAD_REQUEST',
-          message: 'Valid target (email or phone) and channel (EMAIL or SMS) are required.',
+          message: 'Target email address is required.',
+          requestId,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (channel !== 'EMAIL') {
+      logOtpAudit({
+        requestId,
+        stage: 'VALIDATE_REQUEST',
+        status: 'FAILURE',
+        error: `Unsupported verification channel: ${channel}`,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'BAD_REQUEST',
+          message: 'Only EMAIL verification is supported. Mobile number verification has been removed.',
           requestId,
         },
         { status: 400 }
@@ -43,97 +61,63 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
     }
 
     // 1. Email format, duplication, and disposable checks
-    if (channel === 'EMAIL') {
-      const cleanEmail = cleanTarget.toLowerCase();
-      const domain = cleanEmail.split('@')[1];
+    const cleanEmail = cleanTarget.toLowerCase();
+    const domain = cleanEmail.split('@')[1];
 
-      // Format validation
-      if (!cleanEmail.includes('@') || !domain || !domain.includes('.')) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'INVALID_EMAIL_FORMAT',
-            message: 'Please provide a valid email address.',
-            requestId,
-          },
-          { status: 400 }
-        );
-      }
-
-      if (isEmailRegistered(cleanEmail)) {
-        logOtpAudit({
+    // Format validation
+    if (!cleanEmail.includes('@') || !domain || !domain.includes('.')) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'INVALID_EMAIL_FORMAT',
+          message: 'Please provide a valid email address.',
           requestId,
-          emailDomain: domain,
-          stage: 'CHECK_EXISTING_USER',
-          status: 'FAILURE',
-          details: 'Email already registered',
-        });
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'EMAIL_ALREADY_REGISTERED',
-            error: 'EMAIL_ALREADY_REGISTERED',
-            message: 'An account with this email already exists.',
-            requestId,
-          },
-          { status: 400 }
-        );
-      }
-
-      if (isDisposableEmail(cleanEmail)) {
-        logOtpAudit({
-          requestId,
-          emailDomain: domain,
-          stage: 'CHECK_DISPOSABLE',
-          status: 'FAILURE',
-          details: 'Disposable email rejected',
-        });
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'DISPOSABLE_EMAIL',
-            error: 'DISPOSABLE_EMAIL',
-            message: 'Disposable / temporary email addresses are not permitted. Please use a valid work or personal email.',
-            requestId,
-          },
-          { status: 400 }
-        );
-      }
-    } else if (channel === 'SMS') {
-      const normalizedPhone = normalizePhone(cleanTarget);
-      if (!isValidIndianMobile(normalizedPhone)) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'INVALID_PHONE_NUMBER',
-            error: 'INVALID_PHONE_NUMBER',
-            message: 'Please provide a valid 10-digit Indian mobile number (e.g. 9876543210 or +91 98765 43210).',
-            requestId,
-          },
-          { status: 400 }
-        );
-      }
-
-      // IP rate limit for SMS channel to prevent automated abuse
-      const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || '127.0.0.1';
-      const ipCheck = checkRateLimit(`otp_ip_sms_${ipAddress}`, 10, 600);
-      if (!ipCheck.allowed) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'RATE_LIMITED',
-            error: 'RATE_LIMITED',
-            message: 'Too many SMS requests from this network. Please wait before trying again.',
-            resetInSeconds: ipCheck.resetInSeconds,
-            requestId,
-          },
-          { status: 429 }
-        );
-      }
+        },
+        { status: 400 }
+      );
     }
 
-    const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(cleanTarget) : normalizePhone(cleanTarget);
-    const domain = channel === 'EMAIL' ? normalizedTarget.split('@')[1] : undefined;
+    if (isEmailRegistered(cleanEmail)) {
+      logOtpAudit({
+        requestId,
+        emailDomain: domain,
+        stage: 'CHECK_EXISTING_USER',
+        status: 'FAILURE',
+        details: 'Email already registered',
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'EMAIL_ALREADY_REGISTERED',
+          error: 'EMAIL_ALREADY_REGISTERED',
+          message: 'An account with this email already exists.',
+          requestId,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (isDisposableEmail(cleanEmail)) {
+      logOtpAudit({
+        requestId,
+        emailDomain: domain,
+        stage: 'CHECK_DISPOSABLE',
+        status: 'FAILURE',
+        details: 'Disposable email rejected',
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'DISPOSABLE_EMAIL',
+          error: 'DISPOSABLE_EMAIL',
+          message: 'Disposable / temporary email addresses are not permitted. Please use a valid work or personal email.',
+          requestId,
+        },
+        { status: 400 }
+      );
+    }
+
+    const normalizedTarget = normalizeEmail(cleanEmail);
 
     // 2. Sliding window cooldown: 60-second cooldown between consecutive OTP requests for same target
     const cooldownCheck = checkRateLimit(`otp_cd_${normalizedTarget}`, 1, 60);
@@ -173,7 +157,7 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
           success: false,
           code: 'RATE_LIMITED',
           error: 'RATE_LIMITED',
-          message: `Maximum verification code requests exceeded for this ${channel === 'EMAIL' ? 'email' : 'mobile number'}. Please try again after 10 minutes.`,
+          message: 'Maximum verification code requests exceeded for this email. Please try again after 10 minutes.',
           resetInSeconds: rateCheck.resetInSeconds,
           requestId,
         },
@@ -185,8 +169,7 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
     const { code, expiresAt, signupSessionId: sessionId } = createVerificationCode(
       normalizedTarget,
       channel,
-      signupSessionId,
-      requestId
+      signupSessionId
     );
 
     logOtpAudit({
@@ -197,7 +180,7 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
       details: 'Hashed OTP stored with 10-minute expiry',
     });
 
-    // 5. Dispatch OTP through configured provider (Only return success after provider accepts)
+    // 5. Dispatch OTP through email provider (Only return success after provider accepts)
     if (channel === 'EMAIL') {
       try {
         await sendOtpEmail(normalizedTarget, code, requestId);
@@ -218,34 +201,6 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
             message: sendError.code === 'EMAIL_CONFIG_MISSING'
               ? 'Email service is not configured. Please configure SMTP credentials in Developer Settings or environment variables.'
               : (sendError.message || 'Email provider failed to deliver verification code.'),
-            requestId,
-          },
-          { status: 502 }
-        );
-      }
-    } else if (channel === 'SMS') {
-      try {
-        await sendOtpSms(normalizedTarget, code, requestId);
-      } catch (sendError: any) {
-        if (sendError.code === 'SMS_CONFIG_MISSING') {
-          return NextResponse.json(
-            {
-              success: false,
-              code: 'SMS_PROVIDER_NOT_CONFIGURED',
-              error: 'SMS_PROVIDER_NOT_CONFIGURED',
-              message: 'SMS provider is not configured. Please configure an SMS provider in Developer Settings.',
-              requestId,
-            },
-            { status: 503 }
-          );
-        }
-
-        return NextResponse.json(
-          {
-            success: false,
-            code: 'SMS_SEND_FAILED',
-            error: 'SMS_SEND_FAILED',
-            message: sendError.message || 'SMS provider failed to deliver verification code.',
             requestId,
           },
           { status: 502 }

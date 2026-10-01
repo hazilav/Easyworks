@@ -43,7 +43,7 @@ interface AppContextType {
   setAuthModalOpen: (open: boolean) => void;
   authMode: 'login' | 'signup';
   setAuthMode: (mode: 'login' | 'signup') => void;
-  login: (email: string, name?: string, businessName?: string) => void;
+  login: (email: string, name?: string, businessName?: string, customUserId?: string) => void;
   logout: () => void;
   isWorkspaceReady: boolean;
 
@@ -340,9 +340,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentUser, business, customers, catalog, quotations, invoices]);
 
-  const login = (email: string, name?: string, businessName?: string) => {
+  const login = (email: string, name?: string, businessName?: string, customUserId?: string) => {
     const user: UserAccount = {
-      id: 'usr_' + btoa(email.toLowerCase()).replace(/=/g, '').slice(0, 10),
+      id: customUserId || ('usr_' + btoa(email.toLowerCase()).replace(/=/g, '').slice(0, 10)),
       email: email.trim(),
       name: name?.trim() || email.split('@')[0],
       businessName: businessName?.trim() || `${name || email.split('@')[0]}'s Business`,

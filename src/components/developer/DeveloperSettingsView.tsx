@@ -14,11 +14,9 @@ import {
   CreditCard,
   Save,
   Check,
-  Phone,
-  MessageSquare,
 } from 'lucide-react';
 import { safeFetchJson } from '@/lib/api/client';
-import { PaymentSettings, SmsDiagnostics, SmsProviderType } from '@/types';
+import { PaymentSettings } from '@/types';
 
 interface EmailSettingsState {
   provider: 'smtp' | 'resend' | 'sendgrid';
@@ -50,18 +48,8 @@ interface TestEmailResult {
   diagnostics?: EmailDiagnostics | null;
 }
 
-export interface SmsSettingsState {
-  provider: SmsProviderType;
-  apiUrl: string;
-  accountSid: string;
-  authToken: string;
-  senderId: string;
-  messageTemplate: string;
-  isActive: boolean;
-}
-
 export default function DeveloperSettingsView() {
-  const [activeSubTab, setActiveSubTab] = useState<'email' | 'sms' | 'payments' | 'security'>('email');
+  const [activeSubTab, setActiveSubTab] = useState<'email' | 'payments' | 'security'>('email');
 
   // Email Configuration State
   const [emailSettings, setEmailSettings] = useState<EmailSettingsState>({
@@ -88,38 +76,6 @@ export default function DeveloperSettingsView() {
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [testResult, setTestResult] = useState<TestEmailResult | null>(null);
 
-  // SMS Configuration State
-  const [smsSettings, setSmsSettings] = useState<SmsSettingsState>({
-    provider: 'twilio',
-    apiUrl: '',
-    accountSid: '',
-    authToken: '',
-    senderId: 'Easyworks',
-    messageTemplate: 'Easyworks verification code: {{code}}\n\nThis code expires in 10 minutes. If you did not request this code, ignore this message.',
-    isActive: true,
-  });
-  const [smsSource, setSmsSource] = useState<'database' | 'environment' | 'none'>('none');
-  const [isSmsConfigured, setIsSmsConfigured] = useState(false);
-  const [smsDiagnostics, setSmsDiagnostics] = useState<SmsDiagnostics | null>(null);
-  const [loadingSms, setLoadingSms] = useState(false);
-  const [savingSms, setSavingSms] = useState(false);
-  const [smsSuccessMsg, setSmsSuccessMsg] = useState('');
-
-  // SMS Test State
-  const [testPhone, setTestPhone] = useState('');
-  const [testSmsText, setTestSmsText] = useState('');
-  const [testingSmsConnection, setTestingSmsConnection] = useState(false);
-  const [sendingTestSms, setSendingTestSms] = useState(false);
-  const [smsTestResult, setSmsTestResult] = useState<{
-    configured?: string;
-    connection?: string;
-    send?: string;
-    error?: string | null;
-    messageId?: string | null;
-    recipient?: string;
-    diagnostics?: SmsDiagnostics | null;
-  } | null>(null);
-
   // Payment Settings State
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>({
     id: 'default',
@@ -144,7 +100,6 @@ export default function DeveloperSettingsView() {
 
   useEffect(() => {
     fetchEmailSettings();
-    fetchSmsSettings();
     fetchPaymentSettings();
   }, []);
 
@@ -336,149 +291,6 @@ export default function DeveloperSettingsView() {
     }
   };
 
-  const fetchSmsSettings = async () => {
-    try {
-      setLoadingSms(true);
-      const token = getAuthToken();
-      const { data } = await safeFetchJson<{
-        success?: boolean;
-        settings?: any;
-        activeConfig?: any;
-        diagnostics?: SmsDiagnostics;
-      }>('/api/developer/sms/settings', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (data?.success && data.settings) {
-        setSmsSettings({
-          provider: data.settings.provider || 'twilio',
-          apiUrl: data.settings.apiUrl || '',
-          accountSid: data.settings.accountSid || '',
-          authToken: data.settings.authToken || '',
-          senderId: data.settings.senderId || 'Easyworks',
-          messageTemplate: data.settings.messageTemplate || '',
-          isActive: data.settings.isActive !== undefined ? data.settings.isActive : true,
-        });
-        setSmsSource((data.activeConfig?.source || 'none').toLowerCase() as any);
-        setIsSmsConfigured(Boolean(data.activeConfig?.isConfigured));
-        if (data.diagnostics) {
-          setSmsDiagnostics(data.diagnostics);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load SMS settings:', err);
-    } finally {
-      setLoadingSms(false);
-    }
-  };
-
-  const handleSaveSmsSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setSavingSms(true);
-      setSmsSuccessMsg('');
-      const token = getAuthToken();
-
-      const { ok, data, error } = await safeFetchJson<{
-        success?: boolean;
-        message?: string;
-        error?: string;
-        settings?: any;
-        activeConfig?: any;
-        diagnostics?: SmsDiagnostics;
-      }>('/api/developer/sms/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(smsSettings),
-      });
-
-      if (ok && data?.success) {
-        setSmsSuccessMsg('SMS provider settings saved successfully.');
-        setTimeout(() => setSmsSuccessMsg(''), 4000);
-        await fetchSmsSettings();
-      } else {
-        alert(data?.error || error || 'Failed to save SMS settings');
-      }
-    } catch (err: any) {
-      alert(err.message || 'Error saving SMS settings');
-    } finally {
-      setSavingSms(false);
-    }
-  };
-
-  const handleTestSmsConnection = async () => {
-    try {
-      setTestingSmsConnection(true);
-      setSmsTestResult(null);
-      const token = getAuthToken();
-
-      const { data } = await safeFetchJson<any>('/api/developer/sms/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ action: 'test_connection' }),
-      });
-
-      if (data) {
-        setSmsTestResult(data);
-      }
-    } catch (err: any) {
-      setSmsTestResult({
-        configured: 'NO',
-        connection: 'FAILED',
-        send: 'NOT_ATTEMPTED',
-        error: err.message || 'Connection test failed',
-      });
-    } finally {
-      setTestingSmsConnection(false);
-    }
-  };
-
-  const handleSendTestSms = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testPhone.trim()) {
-      alert('Please enter a destination mobile number (e.g. +91 98765 43210 or 9876543210)');
-      return;
-    }
-
-    try {
-      setSendingTestSms(true);
-      setSmsTestResult(null);
-      const token = getAuthToken();
-
-      const { data } = await safeFetchJson<any>('/api/developer/sms/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          action: 'send',
-          testPhone: testPhone.trim(),
-          message: testSmsText.trim() || undefined,
-        }),
-      });
-
-      if (data) {
-        setSmsTestResult(data);
-      }
-    } catch (err: any) {
-      setSmsTestResult({
-        configured: 'NO',
-        connection: 'FAILED',
-        send: 'FAILED',
-        error: err.message || 'Test SMS dispatch failed',
-      });
-    } finally {
-      setSendingTestSms(false);
-    }
-  };
-
   const fetchPaymentSettings = async () => {
     try {
       const token = getAuthToken();
@@ -595,17 +407,6 @@ export default function DeveloperSettingsView() {
             >
               <Mail className="w-3.5 h-3.5" />
               <span>Email & OTP</span>
-            </button>
-            <button
-              onClick={() => setActiveSubTab('sms')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
-                activeSubTab === 'sms'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
-              }`}
-            >
-              <Phone className="w-3.5 h-3.5" />
-              <span>SMS & Mobile OTP</span>
             </button>
             <button
               onClick={() => setActiveSubTab('payments')}
@@ -946,282 +747,6 @@ export default function DeveloperSettingsView() {
                 </button>
               </div>
             </form>
-          </div>
-        )}
-
-        {/* ============================================================= */}
-        {/* SUBTAB: SMS & MOBILE OTP SYSTEM */}
-        {/* ============================================================= */}
-        {activeSubTab === 'sms' && (
-          <div className="space-y-8">
-            {/* Safe Diagnostic Telemetry Card */}
-            <div className="p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-xl ${isSmsConfigured ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
-                    <Phone className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">SMS Provider Telemetry & Diagnostics</h3>
-                    <p className="text-xs text-zinc-400 mt-0.5">Authoritative SMS routing status for mobile number OTP verification.</p>
-                  </div>
-                </div>
-                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
-                  isSmsConfigured ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                }`}>
-                  {isSmsConfigured ? 'CONFIGURED' : 'UNCONFIGURED'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-                  <div className="text-[10px] font-medium text-zinc-400">Provider Source</div>
-                  <div className="text-xs font-bold text-white mt-1 uppercase">
-                    {smsDiagnostics?.source || smsSource || 'NONE'}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-                  <div className="text-[10px] font-medium text-zinc-400">Provider Selected</div>
-                  <div className="text-xs font-bold text-white mt-1 uppercase">
-                    {smsSettings.provider || 'TWILIO'}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-                  <div className="text-[10px] font-medium text-zinc-400">API Credentials</div>
-                  <div className={`text-xs font-bold mt-1 ${smsDiagnostics?.apiCredentialsConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                    {smsDiagnostics?.apiCredentialsConfigured ? 'CONFIGURED' : 'MISSING'}
-                  </div>
-                </div>
-                <div className="p-3.5 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-                  <div className="text-[10px] font-medium text-zinc-400">Sender ID</div>
-                  <div className={`text-xs font-bold mt-1 ${smsDiagnostics?.senderConfigured ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                    {smsDiagnostics?.senderConfigured ? 'CONFIGURED' : 'DEFAULT'}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Provider Configuration Form */}
-            <form onSubmit={handleSaveSmsSettings} className="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 space-y-6">
-              <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
-                <div>
-                  <h3 className="text-sm font-bold text-white">SMS Provider Configuration</h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Configure real SMS gateways (Twilio, MSG91, AWS SNS, Vonage, Generic REST).
-                  </p>
-                </div>
-                {smsSuccessMsg && (
-                  <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5 bg-emerald-950/40 border border-emerald-800/40 px-3 py-1 rounded-lg">
-                    <Check className="w-3.5 h-3.5" />
-                    {smsSuccessMsg}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">SMS Provider *</label>
-                  <select
-                    value={smsSettings.provider}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, provider: e.target.value as SmsProviderType })}
-                    className="w-full h-10 px-3 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="twilio">Twilio SMS (International & India)</option>
-                    <option value="msg91">MSG91 (India DLT Fast OTP)</option>
-                    <option value="vonage">Vonage / Nexmo</option>
-                    <option value="generic_rest">Generic REST / Custom Webhook</option>
-                    <option value="test">Test Simulation Driver</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">Sender ID / From *</label>
-                  <input
-                    type="text"
-                    value={smsSettings.senderId}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, senderId: e.target.value })}
-                    placeholder="e.g. +15005550006 or Easyworks"
-                    className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                    {smsSettings.provider === 'twilio' ? 'Twilio Account SID *' : 'Account SID / Username / Key ID'}
-                  </label>
-                  <input
-                    type="text"
-                    value={smsSettings.accountSid}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, accountSid: e.target.value })}
-                    placeholder={smsSettings.provider === 'twilio' ? 'ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX' : 'API Key or Account identifier'}
-                    className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                    {smsSettings.provider === 'twilio' ? 'Twilio Auth Token *' : 'Auth Token / API Secret *'}
-                  </label>
-                  <input
-                    type="password"
-                    value={smsSettings.authToken}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, authToken: e.target.value })}
-                    placeholder="••••••••"
-                    className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
-                  />
-                </div>
-
-                {smsSettings.provider === 'generic_rest' && (
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">API Webhook URL *</label>
-                    <input
-                      type="url"
-                      value={smsSettings.apiUrl}
-                      onChange={(e) => setSmsSettings({ ...smsSettings, apiUrl: e.target.value })}
-                      placeholder="https://api.sms-gateway.com/send?to={{phone}}&msg={{message}}"
-                      className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                )}
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">OTP Message Template</label>
-                  <textarea
-                    rows={2}
-                    value={smsSettings.messageTemplate}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, messageTemplate: e.target.value })}
-                    placeholder="Easyworks verification code: {{code}}"
-                    className="w-full p-3 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300">
-                  <input
-                    type="checkbox"
-                    checked={smsSettings.isActive}
-                    onChange={(e) => setSmsSettings({ ...smsSettings, isActive: e.target.checked })}
-                    className="rounded border-zinc-700 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span>Active SMS Gateway</span>
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={savingSms}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{savingSms ? 'Saving...' : 'Save SMS Settings'}</span>
-                </button>
-              </div>
-            </form>
-
-            {/* Test SMS Dispatcher */}
-            <div className="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 space-y-5">
-              <div>
-                <h3 className="text-sm font-bold text-white">Live SMS Diagnostic Tester</h3>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Verify SMS provider handshake and dispatch a live test SMS to an Indian mobile number.
-                </p>
-              </div>
-
-              <form onSubmit={handleSendTestSms} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Destination Mobile Number (+91)</label>
-                    <input
-                      type="text"
-                      value={testPhone}
-                      onChange={(e) => setTestPhone(e.target.value)}
-                      placeholder="+91 98765 43210 or 9876543210"
-                      className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Custom Test Message (Optional)</label>
-                    <input
-                      type="text"
-                      value={testSmsText}
-                      onChange={(e) => setTestSmsText(e.target.value)}
-                      placeholder="Leave empty for default diagnostic test"
-                      className="w-full h-10 px-3.5 rounded-xl bg-[#0b0f19] border border-zinc-700 text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleTestSmsConnection}
-                    disabled={testingSmsConnection}
-                    className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${testingSmsConnection ? 'animate-spin' : ''}`} />
-                    <span>{testingSmsConnection ? 'Testing Connection...' : 'Test Connection'}</span>
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={sendingTestSms}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{sendingTestSms ? 'Sending Test SMS...' : 'Send Test SMS'}</span>
-                  </button>
-                </div>
-              </form>
-
-              {smsTestResult && (
-                <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-3">
-                  <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-                    <span className="text-xs font-bold text-white flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-blue-400" />
-                      <span>SMS Dispatch Results</span>
-                    </span>
-                    <span className="text-[10px] text-zinc-500 font-mono">
-                      {new Date().toLocaleTimeString()}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
-                      <div className="text-[10px] text-zinc-400">SMS Provider Configured</div>
-                      <div className={`font-bold mt-1 ${smsTestResult.configured === 'YES' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {smsTestResult.configured || 'NO'}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
-                      <div className="text-[10px] text-zinc-400">Connection Handshake</div>
-                      <div className={`font-bold mt-1 ${smsTestResult.connection === 'SUCCESS' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {smsTestResult.connection || 'FAILED'}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800">
-                      <div className="text-[10px] text-zinc-400">SMS Send Status</div>
-                      <div className={`font-bold mt-1 ${smsTestResult.send === 'ACCEPTED' ? 'text-emerald-400' : (smsTestResult.send === 'NOT_ATTEMPTED' ? 'text-zinc-400' : 'text-red-400')}`}>
-                        {smsTestResult.send || 'NOT_ATTEMPTED'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {smsTestResult.messageId && (
-                    <div className="text-xs text-zinc-300 font-mono bg-zinc-900/80 p-2.5 rounded-lg border border-zinc-800 flex items-center justify-between">
-                      <span className="text-zinc-400">Message ID:</span>
-                      <span className="text-emerald-400 font-semibold">{smsTestResult.messageId}</span>
-                    </div>
-                  )}
-
-                  {smsTestResult.error && (
-                    <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/40 text-xs text-red-300 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
-                      <span>{smsTestResult.error}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
 

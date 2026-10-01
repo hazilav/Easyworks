@@ -7,8 +7,6 @@ import {
   evaluateTrialEligibility,
   getTrialIdentityByUserId,
   getUserById,
-  getVerifiedEmailInSession,
-  hasVerifiedEmailInSession,
 } from '@/lib/db/database';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
@@ -21,14 +19,19 @@ export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req
       return parsed.response;
     }
     const body = parsed.body || {};
-    const { target, code, channel, signupSessionId, name, businessName, finalizeNow } = body;
+    const { target, code, signupSessionId, name, businessName } = body;
+    const channel = (body.channel || 'EMAIL').toUpperCase();
     let userId = body.userId;
 
-    if (!target || !code || !channel) {
-      return apiError('Target, verification code, and channel are required.', 400, 'BAD_REQUEST');
+    if (!target || !code) {
+      return apiError('Target email and verification code are required.', 400, 'BAD_REQUEST');
     }
 
-    const normalizedTarget = channel === 'EMAIL' ? normalizeEmail(target) : normalizePhone(target);
+    if (channel !== 'EMAIL') {
+      return apiError('Only EMAIL verification is supported. Mobile number verification has been removed.', 400, 'BAD_REQUEST');
+    }
+
+    const normalizedTarget = normalizeEmail(target);
 
     // 1. Sliding window rate limit: Max 5 verification attempts per target per 10 minutes
     const rateCheck = checkRateLimit(`otp_verify_${normalizedTarget}`, 5, 600);
@@ -47,70 +50,22 @@ export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req
       return apiError(result.error || 'Invalid verification code.', 400, result.code || 'INVALID_CODE');
     }
 
-    // 3. User lifecycle handling
-    let userResult: any = null;
-    let subscriptionResult: any = null;
-
+    // 3. Complete user lifecycle upon verified email:
+    // Create/activate user -> Create business -> Create 7-day trial with 2 PDF limit -> Create trial identity
     const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || req.headers.get('x-real-ip') || '127.0.0.1';
-    const deviceId = req.headers.get('x-device-id') || req.cookies.get('easyworks_device_id')?.value;
+    const deviceId = req.headers.get('x-device-id') || (req as any).cookies?.get?.('easyworks_device_id')?.value;
 
-    if (channel === 'EMAIL') {
-      // Check if this is a direct single-step completion (e.g. from existing test suites passing name directly)
-      const shouldCreateAccountImmediately = Boolean(finalizeNow || (name && !signupSessionId));
-
-      if (shouldCreateAccountImmediately) {
-        const signup = completeVerifiedSignup({
-          email: target,
-          name,
-          businessName,
-          deviceId,
-          ipAddress,
-        });
-        userResult = signup.user;
-        subscriptionResult = signup.subscription;
-        userId = signup.user.id;
-        verifiedUserId = userId;
-      } else {
-        // Multi-step signup: Email is verified, but permanent account creation is deferred until mobile OTP verification
-        return apiSuccess({
-          message: 'Email verified successfully. Please proceed to mobile number verification.',
-          emailVerified: true,
-          signupSessionId,
-        });
-      }
-    } else if (channel === 'SMS') {
-      // Mobile OTP verified: Create permanent account, business profile, 7-day trial, and 2 PDF downloads
-      const verifiedEmail = body.email ? normalizeEmail(body.email) : (signupSessionId ? getVerifiedEmailInSession(signupSessionId) : null);
-
-      if (verifiedEmail) {
-        const signup = completeVerifiedSignup({
-          email: verifiedEmail,
-          name: name || 'Customer',
-          businessName: businessName || 'My Business',
-          phone: normalizedTarget,
-          deviceId,
-          ipAddress,
-        });
-        userResult = signup.user;
-        subscriptionResult = signup.subscription;
-        userId = signup.user.id;
-        verifiedUserId = userId;
-      } else if (userId) {
-        const existingUser = getUserById(userId);
-        if (existingUser) {
-          createOrUpdateTrialIdentity({
-            userId,
-            email: existingUser.email,
-            phone: normalizedTarget,
-            phoneVerified: true,
-            deviceId,
-            ipAddress,
-          });
-          userResult = existingUser;
-          verifiedUserId = userId;
-        }
-      }
-    }
+    const signup = completeVerifiedSignup({
+      email: target,
+      name,
+      businessName,
+      deviceId,
+      ipAddress,
+    });
+    const userResult = signup.user;
+    const subscriptionResult = signup.subscription;
+    userId = signup.user.id;
+    verifiedUserId = userId;
 
     // 4. Run trial abuse & eligibility evaluation for the verified identity
     let eligibilityResult = null;
@@ -120,7 +75,7 @@ export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req
     }
 
     return apiSuccess({
-      message: `${channel === 'EMAIL' ? 'Email' : 'Mobile number'} verified successfully.`,
+      message: 'Email verified successfully.',
       user: userResult,
       subscription: subscriptionResult,
       identity: currentIdentity,

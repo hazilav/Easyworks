@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         status: 'REQUIRES_VERIFICATION',
         isEligible: false,
         requiresEmailVerification: true,
-        requiresPhoneVerification: true,
+        requiresPhoneVerification: false,
         riskScore: 0,
         message: 'No trial identity recorded yet.',
       });
