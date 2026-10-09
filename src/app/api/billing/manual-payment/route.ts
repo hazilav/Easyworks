@@ -44,11 +44,8 @@ export const POST = withApiRouteHandler('POST /api/billing/manual-payment', asyn
       return apiError('User ID and Plan ID are required.', 400);
     }
 
+    // Transaction ID / UTR and Screenshot are optional. Allow submission even when both are empty.
     const trimmedUtr = typeof utrNumber === 'string' ? utrNumber.trim() : '';
-
-    if (!trimmedUtr && !screenshotUrl && (!notes || !notes.trim())) {
-      return apiError('Please provide either a Transaction ID / UTR number, a payment screenshot, or a reference note.', 400);
-    }
 
     const paymentRequest = createManualPaymentRequest({
       userId,

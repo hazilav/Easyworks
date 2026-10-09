@@ -139,10 +139,6 @@ Please activate my account.`;
 
   const handleSubmitConfirmation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!utrNumber.trim() && !screenshotDataUrl && !notes.trim()) {
-      setErrorMessage('Please provide either your Transaction ID / UTR number, upload a payment screenshot, or add a note.');
-      return;
-    }
 
     if (!currentUser) {
       setErrorMessage('User session not found. Please log in.');
@@ -438,9 +434,14 @@ Branch: ${paymentSettings.bankBranch}`;
                   <h4 className="text-sm font-bold text-slate-900 mb-1">
                     Submit Payment Confirmation Form
                   </h4>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Upload your payment screenshot or enter your Transaction ID / UTR number below after completing your transfer.
-                  </p>
+                  <div className="p-3 my-2 bg-blue-50/80 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+                    <p className="font-semibold text-blue-950">
+                      After completing your payment, please send your payment screenshot to our support WhatsApp for faster verification. If you cannot provide a screenshot, submit your payment details and contact support for assistance.
+                    </p>
+                    <p className="text-[11px] text-blue-700">
+                      If you cannot upload your payment proof on this form, you can submit the form directly and share your screenshot with us via WhatsApp.
+                    </p>
+                  </div>
 
                   {errorMessage && (
                     <div className="p-3 mb-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-2">
@@ -486,6 +487,9 @@ Branch: ${paymentSettings.bankBranch}`;
                           </span>
                         )}
                       </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Screenshot upload is optional. If you cannot upload it here, feel free to send your payment screenshot directly to our support WhatsApp.
+                      </p>
                       {screenshotDataUrl && (
                         <div className="mt-2 relative inline-block border border-slate-200 rounded-lg overflow-hidden">
                           <img
