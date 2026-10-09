@@ -18,6 +18,8 @@ import {
   FileText,
   CheckCircle2,
   Sparkles,
+  HeartPulse,
+  AlertTriangle,
 } from 'lucide-react';
 
 export type DeveloperTab =
@@ -30,6 +32,8 @@ export type DeveloperTab =
   | 'templates'
   | 'businesses'
   | 'documents'
+  | 'health'
+  | 'errors'
   | 'settings'
   | 'security'
   | 'audit';
@@ -69,6 +73,8 @@ export default function DeveloperSidebar({
     { id: 'templates' as DeveloperTab, label: 'Templates', icon: Sparkles },
     { id: 'businesses' as DeveloperTab, label: 'Businesses', icon: Building2 },
     { id: 'documents' as DeveloperTab, label: 'Documents', icon: FileText },
+    { id: 'health' as DeveloperTab, label: 'System Health', icon: HeartPulse },
+    { id: 'errors' as DeveloperTab, label: 'Error Logs', icon: AlertTriangle },
     { id: 'settings' as DeveloperTab, label: 'Settings', icon: Settings },
     { id: 'security' as DeveloperTab, label: 'Security', icon: ShieldAlert },
     { id: 'audit' as DeveloperTab, label: 'Activity Logs', icon: Activity },

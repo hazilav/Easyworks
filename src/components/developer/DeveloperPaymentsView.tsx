@@ -37,6 +37,9 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
   const [rejectionReason, setRejectionReason] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
 
+  // Screenshot modal
+  const [viewScreenshotUrl, setViewScreenshotUrl] = useState<string | null>(null);
+
   // Settings state
   const [settings, setSettings] = useState<PaymentSettings>({
     id: 'default',
@@ -266,7 +269,7 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                   <tr>
                     <th className="py-3 px-4">Customer</th>
                     <th className="py-3 px-4">Plan & Amount</th>
-                    <th className="py-3 px-4">UTR Number</th>
+                    <th className="py-3 px-4">UTR / Screenshot</th>
                     <th className="py-3 px-4">Date & Time</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
@@ -299,10 +302,24 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <div className="font-mono text-zinc-200 bg-[#0e131f] px-2 py-1 rounded-md border border-zinc-800/80 inline-block font-bold">
-                            {p.utrNumber}
+                          <div className="flex flex-col gap-1 items-start">
+                            <span className="font-mono text-zinc-200 bg-[#0e131f] px-2 py-1 rounded-md border border-zinc-800/80 font-bold text-xs inline-block">
+                              {p.utrNumber && p.utrNumber !== 'SCREENSHOT_ATTACHED' && p.utrNumber !== 'PENDING_VERIFY'
+                                ? p.utrNumber
+                                : (p.screenshotUrl ? 'Screenshot Attached' : 'Not Provided')}
+                            </span>
+                            {p.screenshotUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setViewScreenshotUrl(p.screenshotUrl!)}
+                                className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-semibold cursor-pointer py-0.5"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>View Screenshot</span>
+                              </button>
+                            )}
                           </div>
-                          {p.notes && <div className="text-[10px] text-zinc-400 mt-1">{p.notes}</div>}
+                          {p.notes && <div className="text-[10px] text-zinc-400 mt-1 max-w-xs">{p.notes}</div>}
                         </td>
 
                         <td className="py-3.5 px-4">
@@ -457,13 +474,14 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                   <span>Optional Wire / IMPS Bank Transfer Coordinates</span>
                 </h3>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-zinc-300 mb-1.5">Account Beneficiary Name</label>
                     <input
                       type="text"
                       value={settings.bankAccountName}
                       onChange={(e) => setSettings({ ...settings, bankAccountName: e.target.value })}
+                      placeholder="e.g. Easyworks Solutions Private Limited"
                       className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
                     />
                   </div>
@@ -474,6 +492,18 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                       type="text"
                       value={settings.bankName}
                       onChange={(e) => setSettings({ ...settings, bankName: e.target.value })}
+                      placeholder="e.g. HDFC Bank"
+                      className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">Bank Branch</label>
+                    <input
+                      type="text"
+                      value={settings.bankBranch}
+                      onChange={(e) => setSettings({ ...settings, bankBranch: e.target.value })}
+                      placeholder="e.g. Indiranagar Branch, Bengaluru"
                       className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs text-white"
                     />
                   </div>
@@ -484,6 +514,7 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                       type="text"
                       value={settings.bankAccountNumber}
                       onChange={(e) => setSettings({ ...settings, bankAccountNumber: e.target.value })}
+                      placeholder="e.g. 50200088991122"
                       className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs font-mono text-white"
                     />
                   </div>
@@ -493,9 +524,36 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                     <input
                       type="text"
                       value={settings.bankIfsc}
-                      onChange={(e) => setSettings({ ...settings, bankIfsc: e.target.value })}
-                      className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs font-mono text-white"
+                      onChange={(e) => setSettings({ ...settings, bankIfsc: e.target.value.toUpperCase() })}
+                      placeholder="e.g. HDFC0001234"
+                      className="w-full h-10 px-3.5 bg-[#0e131f] border border-zinc-800 rounded-xl text-xs font-mono text-white uppercase"
                     />
+                  </div>
+                </div>
+
+                {/* Live Preview Card matching Customer Modal */}
+                <div className="mt-4 p-4 rounded-xl bg-[#0e131f] border border-zinc-800 text-xs space-y-2">
+                  <div className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Customer Payment Modal Preview</span>
+                    <span className="text-[10px] text-emerald-400 font-normal">Live Preview</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-zinc-300 pt-1">
+                    <div>
+                      <span className="text-zinc-500">Bank:</span>{' '}
+                      <span className="text-white font-medium">{settings.bankName || 'Not Set'}</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Branch:</span>{' '}
+                      <span className="text-white font-medium">{settings.bankBranch || 'Not Set'}</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Account No:</span>{' '}
+                      <span className="text-white font-mono">{settings.bankAccountNumber || 'Not Set'}</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">IFSC:</span>{' '}
+                      <span className="text-white font-mono">{settings.bankIfsc || 'Not Set'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -558,6 +616,42 @@ export default function DeveloperPaymentsView({ onRefreshStats }: DeveloperPayme
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* View Screenshot Modal */}
+      {viewScreenshotUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-[#121724] border border-zinc-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Eye className="w-4 h-4 text-blue-400" />
+                <span>Customer Payment Screenshot</span>
+              </h3>
+              <button
+                onClick={() => setViewScreenshotUrl(null)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="max-h-[65vh] overflow-auto rounded-xl border border-zinc-800 bg-[#0a0d14] flex items-center justify-center p-2">
+              <img
+                src={viewScreenshotUrl}
+                alt="Payment Receipt"
+                className="max-w-full max-h-[60vh] object-contain rounded-lg"
+              />
+            </div>
+            <div className="flex justify-end pt-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setViewScreenshotUrl(null)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

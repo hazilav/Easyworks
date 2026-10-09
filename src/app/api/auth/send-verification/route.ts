@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import {
   createVerificationCode,
   checkRateLimit,
+  rollbackRateLimit,
+  rollbackFailedVerificationCode,
   isEmailRegistered,
 } from '@/lib/db/database';
 import { isDisposableEmail } from '@/lib/abuse/disposableEmails';
@@ -207,7 +209,7 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
     }
 
     // 5. Generate verification OTP & store SHA-256 hash in database
-    const { code, expiresAt, signupSessionId: sessionId } = createVerificationCode(
+    const { id: verificationId, code, expiresAt, signupSessionId: sessionId } = createVerificationCode(
       normalizedTarget,
       channel,
       signupSessionId
@@ -246,6 +248,16 @@ export const POST = withApiRouteHandler('POST /api/auth/send-verification', asyn
         timestamp: new Date().toISOString(),
       })}`);
     } catch (sendError: any) {
+      // Rollback newly generated verification code and rate limit increments
+      // so the user is not locked out by a 60s cooldown or 10m attempt quota when delivery fails
+      try {
+        rollbackFailedVerificationCode(normalizedTarget, verificationId);
+        rollbackRateLimit(`otp_cd_${normalizedTarget}`);
+        rollbackRateLimit(`otp_req_${normalizedTarget}`);
+      } catch (rbErr) {
+        console.warn('[send-verification] Failed to rollback OTP state on send failure:', rbErr);
+      }
+
       const safeErrorMessage = (sendError.message || 'Email provider failed to deliver verification code.')
         .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED]');
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
+import { recordErrorLog, logActivity } from '@/lib/db/database';
 
 /**
  * Strips any sensitive credentials, tokens, passwords, or secrets from error messages and logs.
@@ -36,6 +37,19 @@ export function logApiError(params: LogApiErrorParams): void {
   if (sanitizedStack) {
     console.error(`Stack: ${sanitizedStack}`);
   }
+
+  try {
+    recordErrorLog({
+      requestId: params.requestId,
+      category: 'API',
+      severity: 'HIGH',
+      route: params.apiRoute,
+      message: sanitizedMsg,
+      stackTrace: sanitizedStack,
+      userId: params.userId,
+      metadata: { method: params.method, recordId: params.recordId },
+    });
+  } catch {}
 }
 
 /**

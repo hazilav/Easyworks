@@ -253,25 +253,62 @@ export async function safeFetchJson<T = any>(
   };
 
   const method = (options?.method || 'GET').toUpperCase();
+  const isIdempotent =
+    method === 'GET' ||
+    method === 'HEAD' ||
+    method === 'OPTIONS' ||
+    Boolean(customHeaders['idempotency-key'] || customHeaders['safe-retry']);
 
-  try {
-    const res = await fetch(url, { ...options, headers });
-    return await safeParseResponse<T>(res, clientRequestId, { url, method });
-  } catch (networkErr: any) {
-    console.error(`[API Network Diagnostics]
+  const maxAttempts = isIdempotent ? 3 : 1;
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    attempt++;
+    try {
+      const res = await fetch(url, { ...options, headers });
+      const parsed = await safeParseResponse<T>(res, clientRequestId, { url, method });
+
+      // If server returned 503 Service Unavailable or 504 Gateway Timeout and request is idempotent, retry
+      if (isIdempotent && (parsed.status === 503 || parsed.status === 504) && attempt < maxAttempts) {
+        const delay = Math.min(2000, 200 * Math.pow(2, attempt) + Math.random() * 100);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      return parsed;
+    } catch (networkErr: any) {
+      if (isIdempotent && attempt < maxAttempts) {
+        const delay = Math.min(2000, 200 * Math.pow(2, attempt) + Math.random() * 100);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      console.error(`[API Network Diagnostics]
 Request ID: ${clientRequestId}
 HTTP method: ${method}
 API URL: ${url}
+Attempt: ${attempt}/${maxAttempts}
 Error: ${networkErr?.message || 'Network failure'}`);
 
-    return {
-      ok: false,
-      success: false,
-      status: 0,
-      statusText: 'Network Error',
-      requestId: clientRequestId,
-      error: `Server error — Request ID: ${clientRequestId}. Please try again. If the problem continues, provide this Request ID to the Developer.`,
-      data: null as any,
-    };
+      return {
+        ok: false,
+        success: false,
+        status: 0,
+        statusText: 'Network Error',
+        requestId: clientRequestId,
+        error: `Server error — Request ID: ${clientRequestId}. Please try again. If the problem continues, provide this Request ID to the Developer.`,
+        data: null as any,
+      };
+    }
   }
+
+  return {
+    ok: false,
+    success: false,
+    status: 0,
+    statusText: 'Network Error',
+    requestId: clientRequestId,
+    error: `Server error — Request ID: ${clientRequestId}. Please try again. If the problem continues, provide this Request ID to the Developer.`,
+    data: null as any,
+  };
 }

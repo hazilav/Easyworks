@@ -5,6 +5,7 @@ import {
   rejectManualPayment,
 } from '@/lib/db/database';
 import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
+import { broadcastAdminEvent, broadcastCustomerEvent } from '@/lib/realtime/eventBus';
 
 export const GET = withApiRouteHandler('GET /api/admin/payments', async (req: NextRequest) => {
   try {
@@ -33,6 +34,29 @@ export const POST = withApiRouteHandler('POST /api/admin/payments', async (req: 
 
     if (action === 'APPROVE') {
       const result = approveManualPayment(requestId, adminName || 'Admin');
+      const targetUserId = result.subscription?.userId;
+      try {
+        broadcastAdminEvent('PAYMENT_APPROVED', {
+          requestId,
+          userId: targetUserId,
+          planId: result.subscription?.planId,
+          payment: result.payment,
+        });
+        if (targetUserId) {
+          broadcastCustomerEvent(targetUserId, 'PAYMENT_STATUS_CHANGED', {
+            status: 'APPROVED',
+            requestId,
+            subscription: result.subscription,
+            payment: result.payment,
+          });
+          broadcastCustomerEvent(targetUserId, 'SUBSCRIPTION_UPDATED', {
+            subscription: result.subscription,
+          });
+        }
+      } catch (e) {
+        console.warn('[admin/payments] Realtime broadcast error:', e);
+      }
+
       return apiSuccess({
         message: 'Payment approved and subscription activated',
         payment: result.payment || {},
@@ -40,7 +64,26 @@ export const POST = withApiRouteHandler('POST /api/admin/payments', async (req: 
       });
     } else if (action === 'REJECT') {
       const rejectionReason = reason || 'Payment reference / UTR could not be verified.';
-      rejectManualPayment(requestId, rejectionReason, adminName || 'Admin');
+      const res = rejectManualPayment(requestId, rejectionReason, adminName || 'Admin');
+      const targetUserId = res?.userId;
+
+      try {
+        broadcastAdminEvent('PAYMENT_REJECTED', {
+          requestId,
+          userId: targetUserId,
+          reason: rejectionReason,
+        });
+        if (targetUserId) {
+          broadcastCustomerEvent(targetUserId, 'PAYMENT_STATUS_CHANGED', {
+            status: 'REJECTED',
+            requestId,
+            reason: rejectionReason,
+          });
+        }
+      } catch (e) {
+        console.warn('[admin/payments] Realtime broadcast error:', e);
+      }
+
       return apiSuccess({
         message: 'Payment request marked as rejected.',
       });

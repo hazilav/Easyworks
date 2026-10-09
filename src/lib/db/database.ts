@@ -87,6 +87,9 @@ export function getDatabase(): DatabaseSync {
       } catch (walErr) {
         console.warn('[Database] WAL mode unsupported, falling back to default journal mode:', walErr);
       }
+      try {
+        db.exec('PRAGMA busy_timeout = 5000;');
+      } catch {}
       initDatabase(db);
       globalForDb.__easyworks_db = db;
       console.log(`[Database] SQLite connected at: ${path.basename(dbPath)}`);
@@ -415,6 +418,41 @@ function initDatabase(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_pdf_logs_user ON pdf_usage_logs(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_pdf_logs_created ON pdf_usage_logs(created_at);
+
+    CREATE TABLE IF NOT EXISTS error_logs (
+      id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      route TEXT,
+      message TEXT NOT NULL,
+      stack_trace TEXT,
+      user_id TEXT,
+      recovery_status TEXT NOT NULL DEFAULT 'PENDING',
+      occurrence_count INTEGER NOT NULL DEFAULT 1,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      metadata_json TEXT,
+      resolved_at TEXT,
+      resolved_by TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_error_req ON error_logs(request_id);
+    CREATE INDEX IF NOT EXISTS idx_error_severity ON error_logs(severity);
+    CREATE INDEX IF NOT EXISTS idx_error_category ON error_logs(category);
+    CREATE INDEX IF NOT EXISTS idx_error_status ON error_logs(recovery_status);
+    CREATE INDEX IF NOT EXISTS idx_error_last_seen ON error_logs(last_seen_at);
+
+    CREATE TABLE IF NOT EXISTS realtime_events (
+      id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rt_channel_created ON realtime_events(channel, created_at);
+    CREATE INDEX IF NOT EXISTS idx_rt_created ON realtime_events(created_at);
   `);
 
   // Safe migration for existing subscriptions and users tables
@@ -1374,28 +1412,49 @@ export const verifyAndConsumePdfDownload = verifyAndConsumeTrialPdfDownload;
 
 /**
  * Executes a callback within a SQLite immediate transaction.
- * Supports nesting safely.
+ * Supports nesting safely and performs bounded retry with exponential backoff on SQLITE_BUSY.
  */
-export function runInTransaction<T>(fn: () => T): T {
+export function runInTransaction<T>(fn: () => T, maxRetries = 5): T {
   const db = getDatabase();
-  let inTx = false;
-  try {
-    db.exec('BEGIN IMMEDIATE TRANSACTION;');
-    inTx = true;
-  } catch {
-    // Nested transaction or already active
-    inTx = false;
-  }
+  let attempt = 0;
+  while (true) {
+    let inTx = false;
+    try {
+      try {
+        db.exec('BEGIN IMMEDIATE TRANSACTION;');
+        inTx = true;
+      } catch (beginErr: any) {
+        const msg = String(beginErr?.message || '');
+        const isBusy = msg.includes('busy') || msg.includes('locked') || msg.includes('SQLITE_BUSY');
+        if (isBusy && attempt < maxRetries) {
+          attempt++;
+          const delayMs = Math.floor(15 * Math.pow(2, attempt) + Math.random() * 20);
+          const end = Date.now() + delayMs;
+          while (Date.now() < end) {}
+          continue;
+        }
+        // Nested transaction or already active
+        inTx = false;
+      }
 
-  try {
-    const result = fn();
-    if (inTx) db.exec('COMMIT;');
-    return result;
-  } catch (err) {
-    if (inTx) {
-      try { db.exec('ROLLBACK;'); } catch {}
+      const result = fn();
+      if (inTx) db.exec('COMMIT;');
+      return result;
+    } catch (err: any) {
+      if (inTx) {
+        try { db.exec('ROLLBACK;'); } catch {}
+      }
+      const msg = String(err?.message || '');
+      const isBusy = msg.includes('busy') || msg.includes('locked') || msg.includes('SQLITE_BUSY');
+      if (isBusy && attempt < maxRetries) {
+        attempt++;
+        const delayMs = Math.floor(15 * Math.pow(2, attempt) + Math.random() * 20);
+        const end = Date.now() + delayMs;
+        while (Date.now() < end) {}
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
 }
 
@@ -1888,59 +1947,73 @@ export interface ActiveEmailSettings {
  */
 export function getActiveEmailSettings(): ActiveEmailSettings | null {
   const db = getDatabase();
-  try {
-    const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='email_settings'").get();
-    if (!tableCheck) return null;
+  let attempt = 0;
+  const maxRetries = 3;
 
-    // Fetch active row (is_active = 1 or '1'), falling back to default row
-    const row = (db.prepare(`
-      SELECT * FROM email_settings 
-      WHERE is_active = 1 OR is_active = '1'
-      ORDER BY updated_at DESC 
-      LIMIT 1
-    `).get() || db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get()) as any;
+  while (attempt <= maxRetries) {
+    try {
+      const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='email_settings'").get();
+      if (!tableCheck) return null;
 
-    if (!row) return null;
+      // Fetch active row (is_active = 1 or '1'), falling back to default row
+      const row = (db.prepare(`
+        SELECT * FROM email_settings 
+        WHERE is_active = 1 OR is_active = '1'
+        ORDER BY updated_at DESC 
+        LIMIT 1
+      `).get() || db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get()) as any;
 
-    const host = String(row.smtp_host || row.host || '').trim();
-    const port = Number(row.smtp_port || row.port) || 587;
-    const user = String(row.smtp_user || row.user || '').trim();
-    const pass = String(row.smtp_pass || row.pass || row.password || '').trim();
-    const secure = Boolean(row.smtp_secure || row.secure);
-    const sender = String(row.email_from || row.sender_email || row.from || user).trim();
-    const name = String(row.email_from_name || row.sender_name || row.from_name || 'Easyworks').trim();
-    const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true || (row.is_active == null && Boolean(host && user));
+      if (!row) return null;
 
-    return {
-      id: row.id || 'default',
-      databaseConfigurationId: row.id || 'default',
-      provider: (row.provider as any) || 'smtp',
-      smtp_host: host,
-      smtp_port: port,
-      smtp_user: user,
-      smtp_pass: pass,
-      smtp_secure: secure,
-      email_from: sender,
-      email_from_name: name,
-      sender_email: sender,
-      sender_name: name,
-      is_active: active,
-      updated_at: row.updated_at || new Date().toISOString(),
-      smtpHost: host,
-      smtpPort: port,
-      smtpUser: user,
-      smtpPass: pass,
-      rawPassword: pass,
-      smtpSecure: secure,
-      senderEmail: sender,
-      senderName: name,
-      isActive: active,
-      updatedAt: row.updated_at || new Date().toISOString(),
-    };
-  } catch (err) {
-    console.error('[Database] Failed to getActiveEmailSettings:', err);
-    return null;
+      const host = String(row.smtp_host || row.host || '').trim();
+      const port = Number(row.smtp_port || row.port) || 587;
+      const user = String(row.smtp_user || row.user || '').trim();
+      const pass = String(row.smtp_pass || row.pass || row.password || '').trim();
+      const secure = Boolean(row.smtp_secure || row.secure);
+      const sender = String(row.email_from || row.sender_email || row.from || user).trim();
+      const name = String(row.email_from_name || row.sender_name || row.from_name || 'Easyworks').trim();
+      const active = row.is_active === 1 || row.is_active === '1' || row.is_active === true || (row.is_active == null && Boolean(host && user));
+
+      return {
+        id: row.id || 'default',
+        databaseConfigurationId: row.id || 'default',
+        provider: (row.provider as any) || 'smtp',
+        smtp_host: host,
+        smtp_port: port,
+        smtp_user: user,
+        smtp_pass: pass,
+        smtp_secure: secure,
+        email_from: sender,
+        email_from_name: name,
+        sender_email: sender,
+        sender_name: name,
+        is_active: active,
+        updated_at: row.updated_at || new Date().toISOString(),
+        smtpHost: host,
+        smtpPort: port,
+        smtpUser: user,
+        smtpPass: pass,
+        rawPassword: pass,
+        smtpSecure: secure,
+        senderEmail: sender,
+        senderName: name,
+        isActive: active,
+        updatedAt: row.updated_at || new Date().toISOString(),
+      };
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isBusy = msg.includes('busy') || msg.includes('locked') || msg.includes('SQLITE_BUSY');
+      if (isBusy && attempt < maxRetries) {
+        attempt++;
+        const end = Date.now() + 25 * attempt;
+        while (Date.now() < end) {}
+        continue;
+      }
+      console.error('[Database] Failed to getActiveEmailSettings:', err);
+      return null;
+    }
   }
+  return null;
 }
 
 /**
@@ -2083,7 +2156,7 @@ export function createManualPaymentRequest({
 }: {
   userId: string;
   planId: string;
-  utrNumber: string;
+  utrNumber?: string;
   screenshotUrl?: string;
   notes?: string;
 }): ManualPaymentRequest {
@@ -2102,6 +2175,7 @@ export function createManualPaymentRequest({
 
   const id = 'mpr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   const nowISO = new Date().toISOString();
+  const effectiveUtr = utrNumber && utrNumber.trim().length > 0 ? utrNumber.trim() : (screenshotUrl ? 'SCREENSHOT_ATTACHED' : 'PENDING_VERIFY');
 
   // Insert manual payment request
   db.prepare(`
@@ -2115,7 +2189,7 @@ export function createManualPaymentRequest({
     plan.id,
     plan.name,
     plan.priceINR,
-    utrNumber.trim(),
+    effectiveUtr,
     screenshotUrl || null,
     notes || null,
     nowISO,
@@ -2135,7 +2209,7 @@ export function createManualPaymentRequest({
     planId: plan.id,
     planName: plan.name,
     amountINR: plan.priceINR,
-    utrNumber: utrNumber.trim(),
+    utrNumber: effectiveUtr,
     screenshotUrl,
     notes,
     status: 'PENDING',
@@ -2217,7 +2291,8 @@ export function approveManualPayment(
   const req = db.prepare('SELECT * FROM manual_payment_requests WHERE id = ?').get(requestId) as any;
   if (!req) throw new Error('Payment request not found');
   if (req.status === 'APPROVED') {
-    const existingPayment = db.prepare('SELECT * FROM payments WHERE gateway_payment_id = ?').get(req.utr_number) as any;
+    const payId = req.utr_number && req.utr_number.trim() ? req.utr_number : req.id;
+    const existingPayment = db.prepare('SELECT * FROM payments WHERE gateway_payment_id = ?').get(payId) as any;
     return {
       success: true,
       subscription: getUserSubscription(req.user_id)!,
@@ -2226,13 +2301,14 @@ export function approveManualPayment(
   }
 
   const nowISO = new Date().toISOString();
+  const payId = req.utr_number && req.utr_number.trim() ? req.utr_number : req.id;
 
   return runInTransaction(() => {
     // 1. Activate subscription (sets status ACTIVE, assigns plan PDF download limits)
     const subscription = activateSubscription({
       userId: req.user_id,
       planId: req.plan_id,
-      gatewaySubscriptionId: 'MANUAL_' + req.utr_number,
+      gatewaySubscriptionId: 'MANUAL_' + payId,
     });
 
     // 2. Record formal payment entry
@@ -2245,7 +2321,7 @@ export function approveManualPayment(
       currency: 'INR',
       status: 'SUCCESS',
       gateway: 'manual',
-      gatewayPaymentId: req.utr_number,
+      gatewayPaymentId: payId,
       paymentMethod: 'UPI/Manual Bank Transfer',
     });
 
@@ -2272,7 +2348,7 @@ export function rejectManualPayment(
   requestId: string,
   reason: string,
   adminName: string = 'Admin'
-): { success: boolean } {
+): { success: boolean; userId?: string } {
   const db = getDatabase();
   const req = db.prepare('SELECT * FROM manual_payment_requests WHERE id = ?').get(requestId) as any;
   if (!req) throw new Error('Payment request not found');
@@ -2300,7 +2376,7 @@ export function rejectManualPayment(
     'SUPER_ADMIN'
   );
 
-  return { success: true };
+  return { success: true, userId: req.user_id };
 }
 
 // ------------------------------------------------------------------
@@ -2450,6 +2526,40 @@ export function createOrUpdateTrialIdentity(data: {
  * Creates a secure 6-digit numeric verification code (10-minute expiry) with SHA-256 hash storage.
  * Plaintext OTP is NEVER stored in the database. Only the SHA-256 hash is persisted.
  */
+export function rollbackRateLimit(key: string): void {
+  const db = getDatabase();
+  try {
+    const row = db.prepare('SELECT * FROM rate_limits WHERE key = ?').get(key) as any;
+    if (row && row.count > 0) {
+      if (row.count <= 1) {
+        db.prepare('DELETE FROM rate_limits WHERE key = ?').run(key);
+      } else {
+        db.prepare('UPDATE rate_limits SET count = count - 1 WHERE key = ?').run(key);
+      }
+    }
+  } catch (e) {
+    console.warn('[Database] rollbackRateLimit error:', e);
+  }
+}
+
+export function rollbackFailedVerificationCode(target: string, codeId?: string): void {
+  const db = getDatabase();
+  const normalizedEmailTarget = normalizeEmail(target);
+  const normalizedPhoneTarget = normalizePhone(target);
+  try {
+    if (codeId) {
+      db.prepare('DELETE FROM verification_codes WHERE id = ? AND verified_at IS NULL').run(codeId);
+    } else {
+      db.prepare(`
+        DELETE FROM verification_codes 
+        WHERE (target = ? OR target = ?) AND verified_at IS NULL
+      `).run(normalizedEmailTarget, normalizedPhoneTarget);
+    }
+  } catch (e) {
+    console.warn('[Database] rollbackFailedVerificationCode error:', e);
+  }
+}
+
 export function createVerificationCode(
   target: string,
   channel: 'EMAIL' | 'SMS',
@@ -2469,18 +2579,20 @@ export function createVerificationCode(
   // Compute SHA-256 code hash with target salt
   const codeHash = crypto.createHash('sha256').update(code.trim() + ':' + normalizedTarget).digest('hex');
 
-  // Invalidate any older unverified codes for this target
-  db.prepare(`
-    DELETE FROM verification_codes WHERE target = ? AND verified_at IS NULL
-  `).run(normalizedTarget);
+  return runInTransaction(() => {
+    // Invalidate any older unverified codes for this target
+    db.prepare(`
+      DELETE FROM verification_codes WHERE target = ? AND verified_at IS NULL
+    `).run(normalizedTarget);
 
-  // Store ONLY the hashed OTP in the database (never the plaintext OTP)
-  db.prepare(`
-    INSERT INTO verification_codes (id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-  `).run(id, normalizedTarget, channel, '[HASHED]', codeHash, sessionId, expiresAt, nowISO);
+    // Store ONLY the hashed OTP in the database (never the plaintext OTP)
+    db.prepare(`
+      INSERT INTO verification_codes (id, target, channel, code, code_hash, signup_session_id, expires_at, attempts, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `).run(id, normalizedTarget, channel, '[HASHED]', codeHash, sessionId, expiresAt, nowISO);
 
-  return { id, code, expiresAt, signupSessionId: sessionId };
+    return { id, code, expiresAt, signupSessionId: sessionId };
+  });
 }
 
 /**
@@ -2496,49 +2608,51 @@ export function verifyVerificationCode(
   const normalizedEmailTarget = normalizeEmail(target);
   const normalizedPhoneTarget = normalizePhone(target);
 
-  let query = `
-    SELECT * FROM verification_codes
-    WHERE (target = ? OR target = ?) AND verified_at IS NULL
-  `;
-  const params: any[] = [normalizedEmailTarget, normalizedPhoneTarget];
-  if (signupSessionId) {
-    query += ' AND (signup_session_id = ? OR signup_session_id IS NULL)';
-    params.push(signupSessionId);
-  }
-  query += ' ORDER BY created_at DESC LIMIT 1';
+  return runInTransaction(() => {
+    let query = `
+      SELECT * FROM verification_codes
+      WHERE (target = ? OR target = ?) AND verified_at IS NULL
+    `;
+    const params: any[] = [normalizedEmailTarget, normalizedPhoneTarget];
+    if (signupSessionId) {
+      query += ' AND (signup_session_id = ? OR signup_session_id IS NULL)';
+      params.push(signupSessionId);
+    }
+    query += ' ORDER BY created_at DESC LIMIT 1';
 
-  const row = db.prepare(query).get(...params) as any;
+    const row = db.prepare(query).get(...params) as any;
 
-  if (!row) {
-    return { success: false, error: 'No active verification code found. Please request a new code.', code: 'INVALID_CODE' };
-  }
+    if (!row) {
+      return { success: false, error: 'No active verification code found. Please request a new code.', code: 'INVALID_CODE' };
+    }
 
-  const now = new Date();
-  if (new Date(row.expires_at).getTime() < now.getTime()) {
-    return { success: false, error: 'Verification code has expired. Please request a new code.', code: 'CODE_EXPIRED' };
-  }
+    const now = new Date();
+    if (new Date(row.expires_at).getTime() < now.getTime()) {
+      return { success: false, error: 'Verification code has expired. Please request a new code.', code: 'CODE_EXPIRED' };
+    }
 
-  if (row.attempts >= 5) {
-    return { success: false, error: 'Too many incorrect attempts. Please request a new code.', code: 'MAX_ATTEMPTS_EXCEEDED' };
-  }
+    if (row.attempts >= 5) {
+      return { success: false, error: 'Too many incorrect attempts. Please request a new code.', code: 'MAX_ATTEMPTS_EXCEEDED' };
+    }
 
-  const targetForHash = row.channel === 'EMAIL' ? normalizedEmailTarget : normalizedPhoneTarget;
-  const computedHash = crypto.createHash('sha256').update(code.trim() + ':' + targetForHash).digest('hex');
-  const isMatch = Boolean(row.code_hash && row.code_hash === computedHash);
+    const targetForHash = row.channel === 'EMAIL' ? normalizedEmailTarget : normalizedPhoneTarget;
+    const computedHash = crypto.createHash('sha256').update(code.trim() + ':' + targetForHash).digest('hex');
+    const isMatch = Boolean(row.code_hash && row.code_hash === computedHash);
 
-  if (!isMatch) {
-    db.prepare(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
-    const remaining = 5 - (row.attempts + 1);
-    return {
-      success: false,
-      error: remaining > 0 ? `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` : 'Too many incorrect attempts. Please request a new code.',
-      code: remaining > 0 ? 'INVALID_CODE' : 'MAX_ATTEMPTS_EXCEEDED',
-    };
-  }
+    if (!isMatch) {
+      db.prepare(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`).run(row.id);
+      const remaining = 5 - (row.attempts + 1);
+      return {
+        success: false,
+        error: remaining > 0 ? `Invalid verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` : 'Too many incorrect attempts. Please request a new code.',
+        code: remaining > 0 ? 'INVALID_CODE' : 'MAX_ATTEMPTS_EXCEEDED',
+      };
+    }
 
-  // Success: invalidate code immediately so it cannot be reused
-  db.prepare(`UPDATE verification_codes SET verified_at = ? WHERE id = ?`).run(now.toISOString(), row.id);
-  return { success: true, verificationRecord: row };
+    // Success: invalidate code immediately so it cannot be reused
+    db.prepare(`UPDATE verification_codes SET verified_at = ? WHERE id = ?`).run(now.toISOString(), row.id);
+    return { success: true, verificationRecord: row };
+  });
 }
 
 /**
@@ -2553,26 +2667,28 @@ export function checkRateLimit(
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
 
-  const row = db.prepare('SELECT * FROM rate_limits WHERE key = ?').get(key) as any;
+  return runInTransaction(() => {
+    const row = db.prepare('SELECT * FROM rate_limits WHERE key = ?').get(key) as any;
 
-  if (row && now < row.window_start + windowMs) {
-    if (row.count >= maxCount) {
-      const resetInSeconds = Math.ceil((row.window_start + windowMs - now) / 1000);
-      return { allowed: false, remaining: 0, resetInSeconds };
+    if (row && now < row.window_start + windowMs) {
+      if (row.count >= maxCount) {
+        const resetInSeconds = Math.ceil((row.window_start + windowMs - now) / 1000);
+        return { allowed: false, remaining: 0, resetInSeconds };
+      } else {
+        const newCount = row.count + 1;
+        db.prepare('UPDATE rate_limits SET count = ? WHERE key = ?').run(newCount, key);
+        const resetInSeconds = Math.ceil((row.window_start + windowMs - now) / 1000);
+        return { allowed: true, remaining: maxCount - newCount, resetInSeconds };
+      }
     } else {
-      const newCount = row.count + 1;
-      db.prepare('UPDATE rate_limits SET count = ? WHERE key = ?').run(newCount, key);
-      const resetInSeconds = Math.ceil((row.window_start + windowMs - now) / 1000);
-      return { allowed: true, remaining: maxCount - newCount, resetInSeconds };
+      db.prepare(`
+        INSERT INTO rate_limits (key, count, window_start)
+        VALUES (?, 1, ?)
+        ON CONFLICT(key) DO UPDATE SET count = 1, window_start = excluded.window_start
+      `).run(key, now);
+      return { allowed: true, remaining: maxCount - 1, resetInSeconds: windowSeconds };
     }
-  } else {
-    db.prepare(`
-      INSERT INTO rate_limits (key, count, window_start)
-      VALUES (?, 1, ?)
-      ON CONFLICT(key) DO UPDATE SET count = 1, window_start = excluded.window_start
-    `).run(key, now);
-    return { allowed: true, remaining: maxCount - 1, resetInSeconds: windowSeconds };
-  }
+  });
 }
 
 /**
@@ -4021,4 +4137,362 @@ export function getBusinessProfileByUserId(userId: string): any | null {
     logoEnabled: row.logo_enabled !== 0,
   };
 }
+
+export type ErrorSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+export type ErrorCategory = 'API' | 'DATABASE' | 'AUTH' | 'PAYMENT' | 'EMAIL' | 'PDF' | 'REALTIME' | 'FRONTEND' | 'RUNTIME';
+export type RecoveryStatus = 'PENDING' | 'RECOVERED' | 'FAILED' | 'RESOLVED';
+
+export interface ErrorLogRecord {
+  id: string;
+  requestId: string;
+  category: ErrorCategory;
+  severity: ErrorSeverity;
+  route?: string;
+  message: string;
+  stackTrace?: string;
+  userId?: string;
+  recoveryStatus: RecoveryStatus;
+  occurrenceCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  metadata?: any;
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
+
+export function sanitizeErrorData(input: any): any {
+  if (!input) return input;
+  if (typeof input === 'string') {
+    return input
+      .replace(/password[:=]\s*["']?[^"'\s,]+/gi, 'password=[REDACTED]')
+      .replace(/smtp_pass[:=]\s*["']?[^"'\s,]+/gi, 'smtp_pass=[REDACTED]')
+      .replace(/code[:=]\s*["']?[0-9]{6}["']?/gi, 'code=[REDACTED]')
+      .replace(/bearer\s+[a-zA-Z0-9_\-\.]+/gi, 'Bearer [REDACTED]');
+  }
+  if (typeof input === 'object') {
+    const copy: any = Array.isArray(input) ? [] : {};
+    for (const key of Object.keys(input)) {
+      const lower = key.toLowerCase();
+      if (lower.includes('password') || lower.includes('pass') || lower.includes('secret') || lower.includes('token') || lower.includes('otp') || lower.includes('code_hash')) {
+        copy[key] = '[REDACTED]';
+      } else {
+        copy[key] = sanitizeErrorData(input[key]);
+      }
+    }
+    return copy;
+  }
+  return input;
+}
+
+export function recordErrorLog(params: {
+  requestId?: string;
+  category: string;
+  severity?: string;
+  route?: string;
+  message: string;
+  stackTrace?: string;
+  userId?: string;
+  recoveryStatus?: string;
+  metadata?: any;
+}): string {
+  try {
+    const db = getDatabase();
+    const now = new Date().toISOString();
+    const requestId = params.requestId || `req_${crypto.randomBytes(8).toString('hex')}`;
+    const category = (params.category || 'RUNTIME').toUpperCase();
+    const severity = (params.severity || 'MEDIUM').toUpperCase();
+    const route = params.route || null;
+    const sanitizedMsg = String(sanitizeErrorData(params.message || 'Unknown error')).slice(0, 1000);
+    const sanitizedStack = params.stackTrace ? String(sanitizeErrorData(params.stackTrace)).slice(0, 4000) : null;
+    const userId = params.userId || null;
+    const recoveryStatus = params.recoveryStatus || 'PENDING';
+    const metadataJson = params.metadata ? JSON.stringify(sanitizeErrorData(params.metadata)).slice(0, 4000) : null;
+
+    // Deduplication: look for matching unresolved error in last 1 hour
+    const oneHourAgo = new Date(Date.now() - 3600 * 1000).toISOString();
+    const existing = db.prepare(`
+      SELECT id, occurrence_count FROM error_logs
+      WHERE category = ? AND (route IS ? OR route = ?) AND message = ? AND last_seen_at >= ? AND recovery_status != 'RESOLVED'
+      ORDER BY last_seen_at DESC LIMIT 1
+    `).get(category, route, route, sanitizedMsg, oneHourAgo) as { id: string; occurrence_count: number } | undefined;
+
+    if (existing) {
+      db.prepare(`
+        UPDATE error_logs
+        SET occurrence_count = occurrence_count + 1,
+            last_seen_at = ?,
+            request_id = ?,
+            stack_trace = COALESCE(?, stack_trace),
+            metadata_json = COALESCE(?, metadata_json)
+        WHERE id = ?
+      `).run(now, requestId, sanitizedStack, metadataJson, existing.id);
+      return existing.id;
+    }
+
+    const newId = `err_${crypto.randomBytes(10).toString('hex')}`;
+    db.prepare(`
+      INSERT INTO error_logs (
+        id, request_id, category, severity, route, message, stack_trace,
+        user_id, recovery_status, occurrence_count, first_seen_at, last_seen_at,
+        metadata_json, resolved_at, resolved_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL, NULL)
+    `).run(
+      newId,
+      requestId,
+      category,
+      severity,
+      route,
+      sanitizedMsg,
+      sanitizedStack,
+      userId,
+      recoveryStatus,
+      now,
+      now,
+      metadataJson
+    );
+    return newId;
+  } catch (err) {
+    console.error('[ErrorTracking] Failed to write error log to database:', err);
+    return `fallback_${Date.now()}`;
+  }
+}
+
+export function getErrorLogs(filter?: {
+  category?: string;
+  severity?: string;
+  recoveryStatus?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): { logs: ErrorLogRecord[]; total: number } {
+  const db = getDatabase();
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (filter?.category && filter.category !== 'ALL') {
+    conditions.push('category = ?');
+    params.push(filter.category.toUpperCase());
+  }
+  if (filter?.severity && filter.severity !== 'ALL') {
+    conditions.push('severity = ?');
+    params.push(filter.severity.toUpperCase());
+  }
+  if (filter?.recoveryStatus && filter.recoveryStatus !== 'ALL') {
+    conditions.push('recovery_status = ?');
+    params.push(filter.recoveryStatus.toUpperCase());
+  }
+  if (filter?.search) {
+    conditions.push('(request_id LIKE ? OR message LIKE ? OR route LIKE ?)');
+    const term = `%${filter.search}%`;
+    params.push(term, term, term);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countRow = db.prepare(`SELECT COUNT(*) as count FROM error_logs ${whereClause}`).get(...params) as { count: number };
+  const total = countRow?.count || 0;
+
+  const limit = Math.max(1, Math.min(100, filter?.limit || 50));
+  const offset = Math.max(0, filter?.offset || 0);
+
+  const rows = db.prepare(`
+    SELECT * FROM error_logs
+    ${whereClause}
+    ORDER BY last_seen_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset) as any[];
+
+  const logs: ErrorLogRecord[] = rows.map((r) => {
+    let metadata: any = undefined;
+    if (r.metadata_json) {
+      try { metadata = JSON.parse(r.metadata_json); } catch {}
+    }
+    return {
+      id: r.id,
+      requestId: r.request_id,
+      category: r.category as ErrorCategory,
+      severity: r.severity as ErrorSeverity,
+      route: r.route || undefined,
+      message: r.message,
+      stackTrace: r.stack_trace || undefined,
+      userId: r.user_id || undefined,
+      recoveryStatus: r.recovery_status as RecoveryStatus,
+      occurrenceCount: r.occurrence_count,
+      firstSeenAt: r.first_seen_at,
+      lastSeenAt: r.last_seen_at,
+      metadata,
+      resolvedAt: r.resolved_at || undefined,
+      resolvedBy: r.resolved_by || undefined,
+    };
+  });
+
+  return { logs, total };
+}
+
+export function resolveErrorLog(id: string, adminName: string): boolean {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const res = db.prepare(`
+    UPDATE error_logs
+    SET recovery_status = 'RESOLVED', resolved_at = ?, resolved_by = ?
+    WHERE id = ?
+  `).run(now, adminName || 'Admin', id);
+  return (res as any).changes > 0;
+}
+
+export function acknowledgeErrorLog(id: string, adminName: string): boolean {
+  const db = getDatabase();
+  const res = db.prepare(`
+    UPDATE error_logs
+    SET recovery_status = 'RECOVERED', resolved_by = ?
+    WHERE id = ?
+  `).run(adminName || 'Admin', id);
+  return (res as any).changes > 0;
+}
+
+export function getErrorStats(): {
+  totalUnresolved: number;
+  criticalCount: number;
+  highCount: number;
+  last24hCount: number;
+  categories: Record<string, number>;
+} {
+  const db = getDatabase();
+  const oneDayAgo = new Date(Date.now() - 86400 * 1000).toISOString();
+
+  const unresolved = (db.prepare(`
+    SELECT COUNT(*) as count FROM error_logs WHERE recovery_status != 'RESOLVED'
+  `).get() as any)?.count || 0;
+
+  const critical = (db.prepare(`
+    SELECT COUNT(*) as count FROM error_logs WHERE severity = 'CRITICAL' AND recovery_status != 'RESOLVED'
+  `).get() as any)?.count || 0;
+
+  const high = (db.prepare(`
+    SELECT COUNT(*) as count FROM error_logs WHERE severity = 'HIGH' AND recovery_status != 'RESOLVED'
+  `).get() as any)?.count || 0;
+
+  const last24h = (db.prepare(`
+    SELECT COUNT(*) as count FROM error_logs WHERE last_seen_at >= ?
+  `).get(oneDayAgo) as any)?.count || 0;
+
+  const catRows = db.prepare(`
+    SELECT category, COUNT(*) as count FROM error_logs
+    WHERE recovery_status != 'RESOLVED'
+    GROUP BY category
+  `).all() as { category: string; count: number }[];
+
+  const categories: Record<string, number> = {};
+  for (const row of catRows) {
+    categories[row.category] = row.count;
+  }
+
+  return {
+    totalUnresolved: unresolved,
+    criticalCount: critical,
+    highCount: high,
+    last24hCount: last24h,
+    categories,
+  };
+}
+
+export function performDatabaseIntegrityCheck(): {
+  ok: boolean;
+  integrity: string;
+  tableCounts: Record<string, number>;
+  databaseSizeBytes: number;
+} {
+  const db = getDatabase();
+  let integrity = 'unknown';
+  try {
+    const row = db.prepare('PRAGMA integrity_check').get() as any;
+    integrity = row ? (Object.values(row)[0] as string) : 'ok';
+  } catch (err: any) {
+    integrity = `Error: ${err?.message || 'Check failed'}`;
+  }
+
+  const tableCounts: Record<string, number> = {};
+  const tablesToCheck = ['users', 'subscriptions', 'manual_payment_requests', 'quotations', 'invoices', 'pdf_usage_logs', 'error_logs', 'realtime_events'];
+  for (const tbl of tablesToCheck) {
+    try {
+      const r = db.prepare(`SELECT COUNT(*) as count FROM ${tbl}`).get() as any;
+      tableCounts[tbl] = r?.count || 0;
+    } catch {
+      tableCounts[tbl] = 0;
+    }
+  }
+
+  let databaseSizeBytes = 0;
+  try {
+    const stat = fs.statSync(/*turbopackIgnore: true*/ getDatabaseFilePath());
+    databaseSizeBytes = stat.size;
+  } catch {}
+
+  return {
+    ok: integrity === 'ok',
+    integrity,
+    tableCounts,
+    databaseSizeBytes,
+  };
+}
+
+export function recordRealtimeEvent(channel: string, eventType: string, payload: any): string {
+  const db = getDatabase();
+  const id = `evt_${crypto.randomBytes(8).toString('hex')}`;
+  const now = new Date().toISOString();
+  const payloadJson = JSON.stringify(payload || {});
+
+  db.prepare(`
+    INSERT INTO realtime_events (id, channel, event_type, payload_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, channel, eventType, payloadJson, now);
+
+  // Periodic pruning: keep events table lean (clean events older than 3 days)
+  try {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
+    db.prepare(`DELETE FROM realtime_events WHERE created_at < ?`).run(threeDaysAgo);
+  } catch {}
+
+  return id;
+}
+
+export function getRealtimeEvents(channel: string, since?: string, limit = 50): Array<{
+  id: string;
+  channel: string;
+  eventType: string;
+  payload: any;
+  createdAt: string;
+}> {
+  const db = getDatabase();
+  const effectiveLimit = Math.max(1, Math.min(100, limit));
+  let rows: any[];
+  if (since) {
+    rows = db.prepare(`
+      SELECT * FROM realtime_events
+      WHERE channel = ? AND created_at > ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).all(channel, since, effectiveLimit);
+  } else {
+    rows = db.prepare(`
+      SELECT * FROM realtime_events
+      WHERE channel = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(channel, effectiveLimit);
+    rows.reverse();
+  }
+
+  return rows.map((r) => {
+    let payload = {};
+    try { payload = JSON.parse(r.payload_json); } catch {}
+    return {
+      id: r.id,
+      channel: r.channel,
+      eventType: r.event_type,
+      payload,
+      createdAt: r.created_at,
+    };
+  });
+}
+
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveCustomerDocument, getCustomerDocuments } from '@/lib/db/database';
 import { apiSuccess, apiError, safeReadBody } from '@/lib/api/server';
+import { broadcastAdminEvent, broadcastCustomerEvent } from '@/lib/realtime/eventBus';
 
 export async function POST(req: NextRequest) {
   let userId: string | undefined;
@@ -22,6 +23,22 @@ export async function POST(req: NextRequest) {
     }
 
     saveCustomerDocument(userId, type, document);
+
+    try {
+      broadcastAdminEvent('DOCUMENT_CREATED', {
+        userId,
+        type,
+        title: document?.title || document?.invoiceTitle,
+        total: document?.total || 0,
+      });
+      broadcastCustomerEvent(userId, 'DOCUMENT_UPDATED', {
+        type,
+        id: document?.id,
+      });
+    } catch (e) {
+      console.warn('[documents] Realtime broadcast error:', e);
+    }
+
     return apiSuccess({ message: 'Document saved successfully.' });
   } catch (error: any) {
     if (error?.message && error.message.includes('User not found')) {

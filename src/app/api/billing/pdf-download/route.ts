@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAndConsumeTrialPdfDownload, getUserSubscription } from '@/lib/db/database';
 import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
+import { broadcastAdminEvent, broadcastCustomerEvent } from '@/lib/realtime/eventBus';
 
 export const GET = withApiRouteHandler('GET /api/billing/pdf-download', async (req: NextRequest) => {
   try {
@@ -89,6 +90,23 @@ export const POST = withApiRouteHandler('POST /api/billing/pdf-download', async 
         },
         { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    try {
+      broadcastAdminEvent('PDF_DOWNLOADED', {
+        userId,
+        documentType: (documentType || 'QUOTATION').toUpperCase(),
+        documentId,
+        documentNumber,
+        pdfDownloadsUsed: result.pdfDownloadsUsed,
+      });
+      broadcastCustomerEvent(userId, 'PDF_USAGE_UPDATED', {
+        pdfDownloadsUsed: result.pdfDownloadsUsed,
+        pdfDownloadsRemaining: result.pdfDownloadsRemaining,
+        pdfDownloadLimit: result.pdfDownloadLimit,
+      });
+    } catch (e) {
+      console.warn('[pdf-download] Realtime broadcast error:', e);
     }
 
     return apiSuccess({

@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/database';
 import { normalizeEmail, normalizePhone } from '@/lib/abuse/normalizers';
 import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
+import { broadcastAdminEvent } from '@/lib/realtime/eventBus';
 
 export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req: NextRequest) => {
   let verifiedUserId: string | undefined;
@@ -72,6 +73,18 @@ export const POST = withApiRouteHandler('POST /api/auth/verify-code', async (req
     const currentIdentity = userId ? getTrialIdentityByUserId(userId) : null;
     if (userId && currentIdentity?.emailVerified) {
       eligibilityResult = evaluateTrialEligibility(userId, { deviceId, ipAddress });
+    }
+
+    try {
+      broadcastAdminEvent('CUSTOMER_SIGNUP', {
+        userId: userResult.id,
+        email: userResult.email,
+        name: userResult.name,
+        businessName: userResult.businessName,
+        createdAt: userResult.createdAt,
+      });
+    } catch (e) {
+      console.warn('[verify-code] Realtime broadcast error:', e);
     }
 
     return apiSuccess({

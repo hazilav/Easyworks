@@ -757,9 +757,9 @@ export default function DeveloperSettingsView() {
           <form onSubmit={handleSavePaymentSettings} className="p-6 rounded-2xl bg-zinc-900/40 border border-zinc-800 space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-white">Manual Payment Details (Indiranagar HDFC / UPI)</h3>
+                <h3 className="text-sm font-bold text-white">Manual Payment Details (UPI & Bank Transfer)</h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Displayed to clients during subscription checkout when paying via UPI or Direct IMPS/NEFT.
+                  Displayed to clients during subscription checkout when paying via UPI or Direct IMPS/NEFT (Branch, IFSC, Account Number).
                 </p>
               </div>
               {paymentSuccessMsg && (

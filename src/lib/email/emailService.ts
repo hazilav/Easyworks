@@ -229,10 +229,11 @@ export function createTransporter(config: EmailProviderConfig) {
       user: config.smtpUser,
       pass: config.smtpPass,
     },
-    // Reasonable timeouts to prevent request hanging
+    // Explicit timeouts to prevent hanging requests & handle slow handshakes
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
+    dnsTimeout: 5000,
   });
 }
 
@@ -435,51 +436,81 @@ Easyworks`;
 </body>
 </html>`;
 
-  try {
-    const fromAddress = config.senderName
-      ? `"${config.senderName}" <${config.senderEmail}>`
-      : config.senderEmail;
+  const fromAddress = config.senderName
+    ? `"${config.senderName}" <${config.senderEmail}>`
+    : config.senderEmail;
 
-    const info = await transporter.sendMail({
-      from: fromAddress,
-      to: toEmail,
-      subject,
-      text: textBody,
-      html: htmlBody,
-    });
+  let lastError: any = null;
+  const maxAttempts = 2;
 
-    const isAccepted = Array.isArray(info.accepted) && info.accepted.length > 0;
-    if (!isAccepted && !info.messageId) {
-      throw new Error('Email provider rejected destination address.');
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const activeTransporter = attempt === 1 ? transporter : createTransporter(config);
+      const info = await activeTransporter.sendMail({
+        from: fromAddress,
+        to: toEmail,
+        subject,
+        text: textBody,
+        html: htmlBody,
+      });
+
+      const isAccepted = Array.isArray(info.accepted) && info.accepted.length > 0;
+      if (!isAccepted && !info.messageId) {
+        throw new Error('Email provider rejected destination address.');
+      }
+
+      logOtpAudit({
+        requestId,
+        emailDomain: domain,
+        stage: 'EMAIL_PROVIDER_DISPATCH',
+        status: 'SUCCESS',
+        details: `Accepted: ${JSON.stringify(info.accepted)}, messageId: ${info.messageId}${attempt > 1 ? ` (retry #${attempt})` : ''}`,
+      });
+
+      return { success: true, messageId: info.messageId };
+    } catch (error: any) {
+      lastError = error;
+      const code = String(error?.code || error?.command || error?.syscall || '');
+      const msg = String(error?.message || '').toLowerCase();
+      const isTransient =
+        ['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNRESET', 'EPIPE', 'EAI_AGAIN', 'ENOTFOUND'].some((tc) => code.includes(tc)) ||
+        msg.includes('timeout') ||
+        msg.includes('greeting') ||
+        msg.includes('socket closed') ||
+        msg.includes('connection closed') ||
+        msg.includes('temporarily unavailable');
+
+      if (attempt < maxAttempts && isTransient) {
+        logOtpAudit({
+          requestId,
+          emailDomain: domain,
+          stage: 'EMAIL_PROVIDER_RETRY',
+          status: 'INFO',
+          details: `Transient SMTP failure on attempt ${attempt}: ${code || error.message}. Retrying in 1s...`,
+        });
+        await new Promise((res) => setTimeout(res, 1000));
+        continue;
+      }
+      break;
     }
-
-    logOtpAudit({
-      requestId,
-      emailDomain: domain,
-      stage: 'EMAIL_PROVIDER_DISPATCH',
-      status: 'SUCCESS',
-      details: `Accepted: ${JSON.stringify(info.accepted)}, messageId: ${info.messageId}`,
-    });
-
-    return { success: true, messageId: info.messageId };
-  } catch (error: any) {
-    const safeErrorMsg = (error.message || 'Email delivery failed')
-      .replace(config.smtpPass, '[REDACTED]')
-      .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
-
-    logOtpAudit({
-      requestId,
-      emailDomain: domain,
-      stage: 'EMAIL_PROVIDER_DISPATCH',
-      status: 'FAILURE',
-      error: safeErrorMsg,
-    });
-
-    const err: any = new Error(safeErrorMsg);
-    err.code = 'EMAIL_SEND_FAILED';
-    err.originalError = safeErrorMsg;
-    throw err;
   }
+
+  const safeErrorMsg = (lastError?.message || 'Email delivery failed')
+    .replace(config.smtpPass, '[REDACTED]')
+    .replace(/[a-zA-Z0-9_\-\.]{24,}/g, '[REDACTED_KEY]');
+
+  logOtpAudit({
+    requestId,
+    emailDomain: domain,
+    stage: 'EMAIL_PROVIDER_DISPATCH',
+    status: 'FAILURE',
+    error: safeErrorMsg,
+  });
+
+  const err: any = new Error(safeErrorMsg);
+  err.code = 'EMAIL_SEND_FAILED';
+  err.originalError = safeErrorMsg;
+  throw err;
 }
 
 /**

@@ -139,8 +139,8 @@ Please activate my account.`;
 
   const handleSubmitConfirmation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!utrNumber.trim()) {
-      setErrorMessage('Please enter the Transaction ID / UTR number.');
+    if (!utrNumber.trim() && !screenshotDataUrl && !notes.trim()) {
+      setErrorMessage('Please provide either your Transaction ID / UTR number, upload a payment screenshot, or add a note.');
       return;
     }
 
@@ -439,7 +439,7 @@ Branch: ${paymentSettings.bankBranch}`;
                     Submit Payment Confirmation Form
                   </h4>
                   <p className="text-xs text-slate-500 mb-3">
-                    Enter your Transaction ID or UTR number below after completing your transfer.
+                    Upload your payment screenshot or enter your Transaction ID / UTR number below after completing your transfer.
                   </p>
 
                   {errorMessage && (
@@ -453,14 +453,13 @@ Branch: ${paymentSettings.bankBranch}`;
                     {/* UTR Input */}
                     <div>
                       <label className="block text-xs font-bold text-black mb-1">
-                        Transaction ID / UTR Number <span className="text-red-500">*</span>
+                        Transaction ID / UTR Number <span className="text-xs font-normal text-slate-500">(Optional)</span>
                       </label>
                       <input
                         type="text"
-                        required
                         value={utrNumber}
                         onChange={(e) => setUtrNumber(e.target.value)}
-                        placeholder="e.g. 423984712948 or UPI Ref No."
+                        placeholder="e.g. 423984712948 or UPI Ref No. (Optional)"
                         className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white text-black placeholder:text-slate-400"
                       />
                     </div>
@@ -468,7 +467,7 @@ Branch: ${paymentSettings.bankBranch}`;
                     {/* Screenshot Upload */}
                     <div>
                       <label className="block text-xs font-bold text-black mb-1">
-                        Payment Screenshot (Optional but recommended)
+                        Payment Screenshot <span className="text-xs font-normal text-slate-500">(Optional)</span>
                       </label>
                       <div className="flex items-center gap-3">
                         <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-black text-xs font-semibold rounded-lg border border-slate-300 transition-colors">

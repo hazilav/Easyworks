@@ -22,6 +22,8 @@ import {
 } from '@/lib/initialData';
 import { generateQuotationNumber, generateInvoiceNumber } from '@/lib/calculator';
 import { safeFetchJson } from '@/lib/api/client';
+import { useRealtime } from '@/lib/realtime/useRealtime';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 export type AppView =
   | 'dashboard'
@@ -240,6 +242,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshPlans();
   }, []);
+
+  // Real-time updates for Customer Dashboard (Requirement 1 & 2)
+  useRealtime({
+    channel: 'customer',
+    userId: currentUser?.id,
+    enabled: Boolean(currentUser?.id),
+    onEvent: (event) => {
+      if (event.type === 'PAYMENT_STATUS_CHANGED' || event.type === 'SUBSCRIPTION_UPDATED') {
+        if (event.payload?.subscription) {
+          setSubscription(event.payload.subscription);
+        }
+        refreshSubscription(currentUser);
+      } else if (event.type === 'PDF_USAGE_UPDATED') {
+        if (event.payload?.pdfDownloadsUsed !== undefined) {
+          setSubscription((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  pdfDownloadsUsed: event.payload.pdfDownloadsUsed,
+                  pdfDownloadsRemaining:
+                    event.payload.pdfDownloadsRemaining !== undefined
+                      ? event.payload.pdfDownloadsRemaining
+                      : prev.pdfDownloadsRemaining,
+                  pdfDownloadLimit:
+                    event.payload.pdfDownloadLimit !== undefined
+                      ? event.payload.pdfDownloadLimit
+                      : prev.pdfDownloadLimit,
+                }
+              : prev
+          );
+        }
+      }
+    },
+  });
 
   // Check existing session
   const safeJsonParse = (str: string | null, fallback: any = null) => {
@@ -618,7 +654,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         convertQuotationToInvoice,
       }}
     >
-      {children}
+      <ErrorBoundary componentName="Easyworks Workspace">
+        {children}
+      </ErrorBoundary>
     </AppContext.Provider>
   );
 }

@@ -1419,119 +1419,56 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
                 : 'border-slate-200'
             }`}
           >
-              {/* Modern Header */}
-              {docData.template === 'modern' && (
-                <div className="flex justify-between items-start border-b border-slate-200 pb-4 gap-4">
-                  <div className="flex items-start gap-4">
-                    {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
-                      <img
-                        src={docData.business.logoUrl}
-                        alt={docData.business.businessName || 'Business Logo'}
-                        className="max-h-[70px] max-w-[160px] object-contain shrink-0 rounded"
-                      />
-                    )}
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                        {docData.business.businessName || 'Business Name'}
-                      </h2>
-                      <p className="text-xs text-slate-500 font-normal mt-1">{docData.business.address}</p>
-                      <p className="text-xs text-slate-500 font-normal">
-                        {docData.business.phone} • {docData.business.email}
-                      </p>
-                      {docData.business.taxNumber && (
-                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                          GST/Tax: {docData.business.taxNumber}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span
-                      className={`text-xs font-bold uppercase px-3 py-1 rounded-full whitespace-nowrap ${
-                        isQuotation
-                          ? 'bg-blue-50 text-blue-600'
-                          : 'bg-emerald-50 text-emerald-600'
-                      }`}
-                    >
-                      {isQuotation ? 'QUOTATION' : 'INVOICE'}
-                    </span>
-                    <p className="text-xs font-mono font-bold text-slate-900 mt-2">
-                      {isQuotation ? docData.quotationNumber : docData.invoiceNumber}
-                    </p>
-                    <p className="text-xs text-slate-500 font-normal">Date: {docData.date}</p>
-                    <p className="text-xs text-slate-500 font-normal">
-                      {isQuotation ? 'Valid: ' + docData.validUntil : 'Due: ' + docData.dueDate}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Classic Corporate Header */}
-              {docData.template === 'classic' && (
-                <div className="space-y-3">
-                  {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
-                    <div className="flex items-center justify-between pb-1">
-                      <img
-                        src={docData.business.logoUrl}
-                        alt={docData.business.businessName || 'Business Logo'}
-                        className="max-h-[60px] max-w-[160px] object-contain"
-                      />
-                    </div>
+              {/* Reference-Matched Document Header */}
+              <div className="flex justify-between items-start gap-4 sm:gap-6 pb-2">
+                {/* Left Section — Business Details (max ~62% width) */}
+                <div className="max-w-[62%] flex flex-col items-start space-y-1">
+                  {docData.business?.logoUrl &&
+                  docData.business.logoUrl.trim().length > 0 &&
+                  docData.business.logoEnabled !== false ? (
+                    <img
+                      src={docData.business.logoUrl}
+                      alt={docData.business.businessName || 'Business Logo'}
+                      className="max-h-[60px] max-w-[150px] object-contain object-left mb-2 rounded"
+                    />
+                  ) : (
+                    <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-1">
+                      {docData.business?.businessName || 'Business Name'}
+                    </h2>
                   )}
-                  <div className="bg-slate-900 text-white p-3.5 flex justify-between items-center rounded-xl">
-                    <span className="font-bold text-sm tracking-wider uppercase">
-                      {docData.business.businessName || 'BUSINESS NAME'}
-                    </span>
-                    <span className="text-xs tracking-widest uppercase font-semibold">
-                      {isQuotation ? 'COMMERCIAL QUOTATION' : 'INVOICE'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-start text-xs border-b border-slate-300 pb-3">
-                    <div>
-                      <p className="font-semibold text-slate-900">{docData.business.address}</p>
-                      <p className="text-slate-600">Phone: {docData.business.phone}</p>
-                      <p className="text-slate-600">Email: {docData.business.email}</p>
-                      {docData.business.taxNumber && <p className="text-slate-500 font-mono">Tax ID: {docData.business.taxNumber}</p>}
-                    </div>
-                    <div className="text-right font-mono">
-                      <p className="font-bold text-slate-900 text-xs">
-                        {isQuotation ? docData.quotationNumber : docData.invoiceNumber}
-                      </p>
-                      <p className="text-slate-600">Date: {docData.date}</p>
-                      <p className="text-slate-600">{isQuotation ? `Valid: ${docData.validUntil}` : `Due: ${docData.dueDate}`}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
-              {/* Minimalist Header */}
-              {docData.template === 'minimalist' && (
-                <div className="flex justify-between items-start border-b border-zinc-200 pb-3 gap-4">
-                  <div className="flex items-center gap-3.5">
-                    {docData.business?.logoUrl && docData.business.logoUrl.trim().length > 0 && docData.business.logoEnabled !== false && (
-                      <img
-                        src={docData.business.logoUrl}
-                        alt={docData.business.businessName || 'Business Logo'}
-                        className="max-h-[50px] max-w-[140px] object-contain shrink-0"
-                      />
+                  <div className="text-xs text-slate-500 space-y-0.5 font-normal break-words leading-relaxed">
+                    {docData.business?.address && (
+                      <p className="whitespace-pre-line text-slate-500">{docData.business.address}</p>
                     )}
-                    <div>
-                      <h2 className="text-lg font-bold text-zinc-900 tracking-tight">
-                        {docData.business.businessName || 'Business Name'}
-                      </h2>
-                      <p className="text-xs text-zinc-500 font-normal">{docData.business.email}</p>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span className="text-xs font-semibold text-zinc-400 tracking-wider">
-                      {isQuotation ? 'ESTIMATE / QUOTE' : 'INVOICE'}
-                    </span>
-                    <p className="text-xs font-mono font-bold text-zinc-800">
-                      {isQuotation ? docData.quotationNumber : docData.invoiceNumber}
-                    </p>
+                    {docData.business?.phone && (
+                      <p className="text-slate-500">Phone: {docData.business.phone}</p>
+                    )}
+                    {docData.business?.email && (
+                      <p className="text-slate-500">Email: {docData.business.email}</p>
+                    )}
+                    {docData.business?.taxNumber && (
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        GST / Tax ID: {docData.business.taxNumber}
+                      </p>
+                    )}
                   </div>
                 </div>
-              )}
+
+                {/* Right Section — Document Details (~38% width, right aligned) */}
+                <div className="text-right shrink-0">
+                  <h1 className="text-xl sm:text-2xl font-bold uppercase tracking-tight text-emerald-500">
+                    {isQuotation ? 'QUOTATION' : 'INVOICE'}
+                  </h1>
+                  <p className="text-sm font-bold text-slate-900 mt-1 font-mono">
+                    {isQuotation ? docData.quotationNumber : docData.invoiceNumber}
+                  </p>
+                  <div className="text-xs text-slate-500 mt-2 space-y-0.5 font-normal">
+                    <p>{isQuotation ? 'Quotation Date: ' : 'Invoice Date: '}{docData.date}</p>
+                    <p>{isQuotation ? 'Valid Until: ' : 'Due Date: '}{isQuotation ? docData.validUntil : docData.dueDate}</p>
+                  </div>
+                </div>
+              </div>
 
               {/* Customer Box Preview */}
               <div

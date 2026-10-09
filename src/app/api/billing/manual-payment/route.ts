@@ -5,6 +5,7 @@ import {
   getUserSubscription,
 } from '@/lib/db/database';
 import { apiSuccess, apiError, safeReadBody, withApiRouteHandler } from '@/lib/api/server';
+import { broadcastAdminEvent, broadcastCustomerEvent } from '@/lib/realtime/eventBus';
 
 export const GET = withApiRouteHandler('GET /api/billing/manual-payment', async (req: NextRequest) => {
   try {
@@ -39,23 +40,39 @@ export const POST = withApiRouteHandler('POST /api/billing/manual-payment', asyn
     userId = body.userId;
     const { planId, utrNumber, screenshotUrl, notes } = body;
 
-    if (!userId || !planId || !utrNumber) {
-      return apiError('User ID, Plan ID, and Transaction ID / UTR number are required.', 400);
+    if (!userId || !planId) {
+      return apiError('User ID and Plan ID are required.', 400);
     }
 
-    if (utrNumber.trim().length < 4) {
-      return apiError('Please enter a valid Transaction ID / UTR number (at least 4 characters).', 400);
+    const trimmedUtr = typeof utrNumber === 'string' ? utrNumber.trim() : '';
+
+    if (!trimmedUtr && !screenshotUrl && (!notes || !notes.trim())) {
+      return apiError('Please provide either a Transaction ID / UTR number, a payment screenshot, or a reference note.', 400);
     }
 
     const paymentRequest = createManualPaymentRequest({
       userId,
       planId,
-      utrNumber: utrNumber.trim(),
+      utrNumber: trimmedUtr,
       screenshotUrl,
       notes,
     });
 
     const updatedSubscription = getUserSubscription(userId);
+
+    try {
+      broadcastAdminEvent('PAYMENT_SUBMITTED', {
+        paymentRequest,
+        userId,
+        planId,
+      });
+      broadcastCustomerEvent(userId, 'PAYMENT_SUBMITTED', {
+        paymentRequest,
+        subscription: updatedSubscription,
+      });
+    } catch (e) {
+      console.warn('[manual-payment] Realtime broadcast error:', e);
+    }
 
     return apiSuccess({
       message: 'Payment confirmation submitted successfully. Awaiting admin verification.',

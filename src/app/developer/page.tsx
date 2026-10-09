@@ -13,12 +13,16 @@ import DeveloperBusinessesView from '@/components/developer/DeveloperBusinessesV
 import DeveloperDocumentsView from '@/components/developer/DeveloperDocumentsView';
 import DeveloperTemplatesView from '@/components/developer/DeveloperTemplatesView';
 import DeveloperSettingsView from '@/components/developer/DeveloperSettingsView';
+import { DeveloperHealthView } from '@/components/developer/DeveloperHealthView';
+import { DeveloperErrorsView } from '@/components/developer/DeveloperErrorsView';
+import { useRealtime } from '@/lib/realtime/useRealtime';
 import { DeveloperStats, SubscriptionPlan } from '@/types';
 import { Menu } from 'lucide-react';
 import { safeFetchJson } from '@/lib/api/client';
 
 export default function DeveloperPage() {
   const [developerUser, setDeveloperUser] = useState<any | null>(null);
+  const [developerToken, setDeveloperToken] = useState<string>('');
   const [currentTab, setCurrentTab] = useState<DeveloperTab>('dashboard');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [stats, setStats] = useState<DeveloperStats | null>(null);
@@ -26,12 +30,25 @@ export default function DeveloperPage() {
   const [loadingStats, setLoadingStats] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
 
+  // Real-time automatic updates for Developer Dashboard
+  useRealtime({
+    channel: 'admin',
+    token: developerToken,
+    enabled: Boolean(developerUser && developerToken),
+    onEvent: (event) => {
+      // Auto-reload stats and plans on any admin broadcast
+      loadStats(developerToken);
+      loadPlans(developerToken);
+    },
+  });
+
   // Check existing session
   useEffect(() => {
     const token = localStorage.getItem('ew_developer_token');
     const savedUser = localStorage.getItem('ew_developer_user');
 
     if (token && savedUser) {
+      setDeveloperToken(token);
       try {
         const parsed = JSON.parse(savedUser);
         if (parsed) setDeveloperUser(parsed);
@@ -95,6 +112,7 @@ export default function DeveloperPage() {
 
   const handleLoginSuccess = (user: any, token: string) => {
     setDeveloperUser(user);
+    setDeveloperToken(token);
     loadStats(token);
     loadPlans(token);
   };
@@ -103,6 +121,7 @@ export default function DeveloperPage() {
     localStorage.removeItem('ew_developer_token');
     localStorage.removeItem('ew_developer_user');
     setDeveloperUser(null);
+    setDeveloperToken('');
     setStats(null);
   };
 
@@ -277,6 +296,18 @@ export default function DeveloperPage() {
 
         {currentTab === 'settings' && (
           <DeveloperSettingsView />
+        )}
+
+        {currentTab === 'health' && (
+          <div className="flex-1 overflow-y-auto p-6 bg-[#0b0f19]">
+            <DeveloperHealthView token={developerToken || (typeof window !== 'undefined' ? localStorage.getItem('ew_developer_token') || '' : '')} />
+          </div>
+        )}
+
+        {currentTab === 'errors' && (
+          <div className="flex-1 overflow-y-auto p-6 bg-[#0b0f19]">
+            <DeveloperErrorsView token={developerToken || (typeof window !== 'undefined' ? localStorage.getItem('ew_developer_token') || '' : '')} />
+          </div>
         )}
       </main>
     </div>
