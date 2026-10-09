@@ -99,13 +99,13 @@ export function getEmailProviderConfig(): EmailProviderConfig {
   const dbName = (settings?.email_from_name || settings?.sender_name || settings?.senderName || '').trim();
   const isDbActive = Boolean(settings && (settings.is_active === true || settings.isActive === true));
 
-  // 2. Resolve environment variables
-  const envHost = (process.env.SMTP_HOST || '').trim();
+  // 2. Resolve environment variables (with Gmail defaults)
+  const envHost = (process.env.SMTP_HOST || 'smtp.gmail.com').trim();
   const envPort = Number(process.env.SMTP_PORT) || 587;
-  const envUser = (process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
-  const envPass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
-  const envSender = (process.env.EMAIL_FROM || process.env.SENDER_EMAIL || '').trim();
-  const envName = (process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || '').trim();
+  const envUser = (process.env.SMTP_USER || process.env.SMTP_USERNAME || 'easyworksofficiall@gmail.com').trim();
+  const envPass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || 'ygfv ueka uxuo oxgt').replace(/\s+/g, '').trim();
+  const envSender = (process.env.EMAIL_FROM || process.env.SENDER_EMAIL || 'easyworksofficiall@gmail.com').trim();
+  const envName = (process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks').trim();
 
   // 3. Determine source and resolve fields
   // Database takes precedence if active and has host + user + (dbPass or envPass)

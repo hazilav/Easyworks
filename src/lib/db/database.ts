@@ -634,6 +634,54 @@ function initDatabase(db: DatabaseSync) {
     // ignore
   }
 
+  // Ensure default Gmail SMTP settings in email_settings table
+  try {
+    const existingEmail = db.prepare("SELECT * FROM email_settings WHERE id = 'default'").get() as any;
+    const defaultHost = 'smtp.gmail.com';
+    const defaultPort = 587;
+    const defaultUser = 'easyworksofficiall@gmail.com';
+    const defaultPass = 'ygfv ueka uxuo oxgt'.replace(/\s+/g, '');
+    const defaultSecure = 0;
+    const defaultSender = 'easyworksofficiall@gmail.com';
+    const defaultName = 'Easyworks';
+    const nowISO = new Date().toISOString();
+
+    if (!existingEmail || !existingEmail.smtp_host || !existingEmail.smtp_user || existingEmail.smtp_host.includes('ethereal')) {
+      db.prepare(`
+        INSERT INTO email_settings (
+          id, provider, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_secure,
+          sender_email, sender_name, email_from, email_from_name, is_active, updated_at
+        ) VALUES ('default', 'smtp', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          provider = 'smtp',
+          smtp_host = excluded.smtp_host,
+          smtp_port = excluded.smtp_port,
+          smtp_user = excluded.smtp_user,
+          smtp_pass = excluded.smtp_pass,
+          smtp_secure = excluded.smtp_secure,
+          sender_email = excluded.sender_email,
+          sender_name = excluded.sender_name,
+          email_from = excluded.email_from,
+          email_from_name = excluded.email_from_name,
+          is_active = 1,
+          updated_at = excluded.updated_at
+      `).run(
+        defaultHost,
+        defaultPort,
+        defaultUser,
+        defaultPass,
+        defaultSecure,
+        defaultSender,
+        defaultName,
+        defaultSender,
+        defaultName,
+        nowISO
+      );
+    }
+  } catch (err) {
+    console.warn('[Database] Error seeding default email_settings:', err);
+  }
+
   // Ensure Super Admin Muhammed Hazil (muhammedhazilav@gmail.com)
   try {
     const adminEmail = 'muhammedhazilav@gmail.com';
@@ -2029,11 +2077,11 @@ export function getRawEmailSettings(): ActiveEmailSettings | null {
 export function getEmailSettings(): EmailSettingsRecord {
   const active = getActiveEmailSettings();
   if (!active || (!active.smtp_host && !active.smtp_user)) {
-    const envHost = process.env.SMTP_HOST || '';
-    const envUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || '';
-    const envPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '';
+    const envHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const envUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || 'easyworksofficiall@gmail.com';
+    const envPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || 'ygfv ueka uxuo oxgt'.replace(/\s+/g, '');
     const envPort = parseInt(process.env.SMTP_PORT || '587', 10);
-    const envSender = process.env.EMAIL_FROM || process.env.SENDER_EMAIL || envUser;
+    const envSender = process.env.EMAIL_FROM || process.env.SENDER_EMAIL || 'easyworksofficiall@gmail.com';
     const envName = process.env.EMAIL_FROM_NAME || process.env.SENDER_NAME || 'Easyworks';
 
     return {
@@ -2046,7 +2094,7 @@ export function getEmailSettings(): EmailSettingsRecord {
       smtpSecure: process.env.SMTP_SECURE === 'true' || envPort === 465,
       senderEmail: envSender,
       senderName: envName,
-      isActive: Boolean(envHost && envUser && envPass),
+      isActive: true,
       updatedAt: new Date().toISOString(),
     };
   }
