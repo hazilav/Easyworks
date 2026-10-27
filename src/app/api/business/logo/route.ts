@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   updateBusinessLogo,
   toggleBusinessLogo,
+  toggleBusinessLogoBackgroundMode,
+  resetBusinessLogoToOriginal,
   removeBusinessLogo,
   getBusinessLogo,
   getUserById,
 } from '@/lib/db/database';
 import { apiSuccess, apiError, apiBadRequest, apiNotFound } from '@/lib/api/server';
+import { processBusinessLogo } from '@/lib/imageProcessor';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -107,6 +110,9 @@ export async function POST(req: NextRequest) {
     let logoEnabledQuotations = true;
     let logoEnabledInvoices = true;
 
+    let buffer: Buffer;
+    let mimeType = 'image/png';
+
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
       userId = (formData.get('userId') as string) || '';
@@ -138,14 +144,13 @@ export async function POST(req: NextRequest) {
 
       const rawMime = file.type || '';
       const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      buffer = Buffer.from(arrayBuffer);
 
       const validation = validateImageBuffer(buffer, rawMime);
       if (!validation.valid || !validation.normalizedMime) {
         return apiBadRequest(validation.error || 'Invalid image file.');
       }
-
-      logoDataUrl = `data:${validation.normalizedMime};base64,${buffer.toString('base64')}`;
+      mimeType = validation.normalizedMime;
     } else if (contentType.includes('application/json')) {
       const body = await req.json();
       userId = body.userId || '';
@@ -174,20 +179,19 @@ export async function POST(req: NextRequest) {
         return apiBadRequest('Invalid data URL format. Expected base64 image data URL.');
       }
 
-      const mimeType = match[1];
-      if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+      const rawMime = match[1];
+      if (!ALLOWED_MIME_TYPES.has(rawMime)) {
         return apiBadRequest('Unsupported image type.');
       }
 
       const base64Data = match[2];
-      const buffer = Buffer.from(base64Data, 'base64');
+      buffer = Buffer.from(base64Data, 'base64');
 
-      const validation = validateImageBuffer(buffer, mimeType);
+      const validation = validateImageBuffer(buffer, rawMime);
       if (!validation.valid || !validation.normalizedMime) {
         return apiBadRequest(validation.error || 'Invalid image content.');
       }
-
-      logoDataUrl = `data:${validation.normalizedMime};base64,${buffer.toString('base64')}`;
+      mimeType = validation.normalizedMime;
     } else {
       return apiBadRequest('Unsupported content type. Send multipart/form-data or application/json.');
     }
@@ -201,17 +205,62 @@ export async function POST(req: NextRequest) {
       return apiNotFound('User not found.');
     }
 
-    const result = updateBusinessLogo(userId, logoDataUrl, {
+    // Process image: remove background where appropriate, auto-trim, and preserve original
+    let procResult;
+    try {
+      procResult = await processBusinessLogo(buffer, mimeType, {
+        tolerance: 32,
+        feather: true,
+        autoTrim: true,
+      });
+    } catch (procErr: any) {
+      console.warn('[processBusinessLogo] Failed to process image, falling back to original:', procErr);
+      const fallbackDataUrl = `data:${mimeType};base64,${buffer.toString('base64')}`;
+      procResult = {
+        success: true,
+        isTransparentAlready: false,
+        backgroundRemoved: false,
+        originalDataUrl: fallbackDataUrl,
+        processedDataUrl: fallbackDataUrl,
+        originalDimensions: { width: 150, height: 65 },
+        processedDimensions: { width: 150, height: 65 },
+        aspectRatio: 2.3,
+      };
+    }
+
+    // Default to processed transparent logo unless explicitly requested otherwise
+    const requestedMode = (contentType.includes('application/json') ? (await req.clone().json().catch(() => ({})))?.logoBackgroundMode : undefined) as 'transparent' | 'original' | undefined;
+    const initialMode: 'transparent' | 'original' = requestedMode === 'original' ? 'original' : 'transparent';
+    const activeUrl = initialMode === 'original' ? procResult.originalDataUrl : procResult.processedDataUrl;
+
+    const result = updateBusinessLogo(userId, activeUrl, {
+      logoOriginalUrl: procResult.originalDataUrl,
+      logoProcessedUrl: procResult.processedDataUrl,
+      logoBackgroundMode: initialMode,
       logoEnabled,
       logoEnabledQuotations,
       logoEnabledInvoices,
     });
+
     return apiSuccess({
-      message: 'Business logo uploaded successfully.',
+      message: procResult.backgroundRemoved
+        ? 'Logo uploaded and background automatically removed successfully.'
+        : procResult.isTransparentAlready
+        ? 'Logo uploaded (existing transparency preserved).'
+        : 'Logo uploaded successfully.',
       logoUrl: result.logoUrl,
+      logoOriginalUrl: result.logoOriginalUrl,
+      logoProcessedUrl: result.logoProcessedUrl,
+      logoBackgroundMode: result.logoBackgroundMode,
       logoEnabled: result.logoEnabled,
       logoEnabledQuotations: result.logoEnabledQuotations,
       logoEnabledInvoices: result.logoEnabledInvoices,
+      backgroundRemoved: procResult.backgroundRemoved,
+      isTransparentAlready: procResult.isTransparentAlready,
+      detectedBackgroundColor: procResult.detectedBackgroundColor,
+      originalDimensions: procResult.originalDimensions,
+      processedDimensions: procResult.processedDimensions,
+      aspectRatio: procResult.aspectRatio,
     });
   } catch (error: any) {
     console.error('[POST /api/business/logo] Error:', error);
@@ -221,12 +270,21 @@ export async function POST(req: NextRequest) {
 
 /**
  * PATCH /api/business/logo
- * Toggles logo visibility on documents (can toggle quotes, invoices, or all).
+ * Toggles logo visibility on documents or switches background mode.
  */
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, target, enabled, logoEnabled, logoEnabledQuotations, logoEnabledInvoices } = body;
+    const {
+      userId,
+      target,
+      enabled,
+      mode,
+      resetToOriginal,
+      logoEnabled,
+      logoEnabledQuotations,
+      logoEnabledInvoices,
+    } = body;
 
     if (!userId || typeof userId !== 'string') {
       return apiBadRequest('User ID is required.');
@@ -237,6 +295,38 @@ export async function PATCH(req: NextRequest) {
       return apiNotFound('User not found.');
     }
 
+    // 1. Background mode switch or Reset to Original
+    if (resetToOriginal) {
+      resetBusinessLogoToOriginal(userId);
+      const current = getBusinessLogo(userId);
+      return apiSuccess({
+        message: 'Logo reset to original upload successfully.',
+        logoUrl: current.logoUrl,
+        logoBackgroundMode: current.logoBackgroundMode,
+        logoOriginalUrl: current.logoOriginalUrl,
+        logoProcessedUrl: current.logoProcessedUrl,
+        logoEnabled: current.logoEnabled,
+        logoEnabledQuotations: current.logoEnabledQuotations,
+        logoEnabledInvoices: current.logoEnabledInvoices,
+      });
+    }
+
+    if (mode === 'transparent' || mode === 'original') {
+      const modeRes = toggleBusinessLogoBackgroundMode(userId, mode);
+      const current = getBusinessLogo(userId);
+      return apiSuccess({
+        message: `Logo background mode updated to ${mode}.`,
+        logoUrl: modeRes.logoUrl,
+        logoBackgroundMode: modeRes.logoBackgroundMode,
+        logoOriginalUrl: current.logoOriginalUrl,
+        logoProcessedUrl: current.logoProcessedUrl,
+        logoEnabled: current.logoEnabled,
+        logoEnabledQuotations: current.logoEnabledQuotations,
+        logoEnabledInvoices: current.logoEnabledInvoices,
+      });
+    }
+
+    // 2. Document visibility toggles
     let result;
     if (target === 'quotations' || target === 'invoices' || target === 'all') {
       const isEnabled = enabled !== undefined ? Boolean(enabled) : true;
@@ -248,11 +338,16 @@ export async function PATCH(req: NextRequest) {
     } else if (logoEnabled !== undefined) {
       result = toggleBusinessLogo(userId, 'all', Boolean(logoEnabled));
     } else {
-      return apiBadRequest('Please provide target (quotations/invoices/all) and enabled boolean, or specific flag.');
+      return apiBadRequest('Please provide target (quotations/invoices/all) and enabled boolean, or mode (transparent/original).');
     }
 
+    const current = getBusinessLogo(userId);
     return apiSuccess({
       message: 'Logo visibility updated successfully.',
+      logoUrl: current.logoUrl,
+      logoBackgroundMode: current.logoBackgroundMode,
+      logoOriginalUrl: current.logoOriginalUrl,
+      logoProcessedUrl: current.logoProcessedUrl,
       logoEnabled: result.logoEnabled,
       logoEnabledQuotations: result.logoEnabledQuotations,
       logoEnabledInvoices: result.logoEnabledInvoices,

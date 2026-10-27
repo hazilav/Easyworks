@@ -35,6 +35,9 @@ export interface BusinessProfile {
     paymentInstructions?: string;
   };
   logoUrl?: string;
+  logoOriginalUrl?: string;
+  logoProcessedUrl?: string;
+  logoBackgroundMode?: 'transparent' | 'original';
   logoEnabled?: boolean;
   logoEnabledQuotations?: boolean;
   logoEnabledInvoices?: boolean;
@@ -117,6 +120,9 @@ export interface Quotation {
     website?: string;
     taxNumber?: string;
     logoUrl?: string;
+    logoOriginalUrl?: string;
+    logoProcessedUrl?: string;
+    logoBackgroundMode?: 'transparent' | 'original';
     logoEnabled?: boolean;
     logoEnabledQuotations?: boolean;
     logoEnabledInvoices?: boolean;
@@ -157,6 +163,9 @@ export interface Invoice {
     website?: string;
     taxNumber?: string;
     logoUrl?: string;
+    logoOriginalUrl?: string;
+    logoProcessedUrl?: string;
+    logoBackgroundMode?: 'transparent' | 'original';
     logoEnabled?: boolean;
     logoEnabledQuotations?: boolean;
     logoEnabledInvoices?: boolean;

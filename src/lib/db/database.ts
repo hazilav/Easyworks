@@ -171,6 +171,9 @@ function initDatabase(db: DatabaseSync) {
       owner_name TEXT NOT NULL,
       currency TEXT NOT NULL DEFAULT 'INR',
       logo_url TEXT,
+      logo_original_url TEXT,
+      logo_processed_url TEXT,
+      logo_background_mode TEXT NOT NULL DEFAULT 'transparent',
       logo_enabled INTEGER NOT NULL DEFAULT 1,
       logo_enabled_quotations INTEGER NOT NULL DEFAULT 1,
       logo_enabled_invoices INTEGER NOT NULL DEFAULT 1,
@@ -483,6 +486,9 @@ function initDatabase(db: DatabaseSync) {
 
   // Safe migrations for businesses table
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_url TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_original_url TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_processed_url TEXT;'); } catch {}
+  try { db.exec("ALTER TABLE businesses ADD COLUMN logo_background_mode TEXT NOT NULL DEFAULT 'transparent';"); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled INTEGER NOT NULL DEFAULT 1;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled_quotations INTEGER NOT NULL DEFAULT 1;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled_invoices INTEGER NOT NULL DEFAULT 1;'); } catch {}
@@ -3965,6 +3971,9 @@ export function getAllBusinessesOverview(): any[] {
       u.created_at,
       b.currency,
       b.logo_url,
+      b.logo_original_url,
+      b.logo_processed_url,
+      b.logo_background_mode,
       b.logo_enabled,
       b.logo_enabled_quotations,
       b.logo_enabled_invoices,
@@ -3993,6 +4002,9 @@ export function getAllBusinessesOverview(): any[] {
     currency: r.currency || 'INR',
     hasLogo: Boolean(r.logo_url && r.logo_url.trim().length > 0),
     logoUrl: r.logo_url || null,
+    logoOriginalUrl: r.logo_original_url || r.logo_url || null,
+    logoProcessedUrl: r.logo_processed_url || r.logo_url || null,
+    logoBackgroundMode: r.logo_background_mode || 'transparent',
     logoEnabled: r.logo_enabled !== 0,
     logoEnabledQuotations: r.logo_enabled_quotations !== 0,
     logoEnabledInvoices: r.logo_enabled_invoices !== 0,
@@ -4080,6 +4092,9 @@ export function updateBusinessLogo(
   userId: string,
   logoUrl: string,
   options?: {
+    logoOriginalUrl?: string;
+    logoProcessedUrl?: string;
+    logoBackgroundMode?: 'transparent' | 'original';
     logoEnabled?: boolean;
     logoEnabledQuotations?: boolean;
     logoEnabledInvoices?: boolean;
@@ -4087,6 +4102,9 @@ export function updateBusinessLogo(
 ): {
   success: boolean;
   logoUrl: string;
+  logoOriginalUrl: string | null;
+  logoProcessedUrl: string | null;
+  logoBackgroundMode: 'transparent' | 'original';
   logoEnabled: boolean;
   logoEnabledQuotations: boolean;
   logoEnabledInvoices: boolean;
@@ -4097,6 +4115,9 @@ export function updateBusinessLogo(
   let logoEnabled = true;
   let logoEnabledQuotations = true;
   let logoEnabledInvoices = true;
+  let logoOriginalUrl = logoUrl;
+  let logoProcessedUrl = logoUrl;
+  let logoBackgroundMode: 'transparent' | 'original' = 'transparent';
 
   if (typeof options === 'boolean') {
     logoEnabled = options;
@@ -4106,17 +4127,27 @@ export function updateBusinessLogo(
     logoEnabled = options.logoEnabled ?? true;
     logoEnabledQuotations = options.logoEnabledQuotations ?? logoEnabled;
     logoEnabledInvoices = options.logoEnabledInvoices ?? logoEnabled;
+    if (options.logoOriginalUrl) logoOriginalUrl = options.logoOriginalUrl;
+    if (options.logoProcessedUrl) logoProcessedUrl = options.logoProcessedUrl;
+    if (options.logoBackgroundMode) logoBackgroundMode = options.logoBackgroundMode;
   }
+
+  // Active logo depends on mode
+  const activeLogoUrl = logoBackgroundMode === 'original' ? logoOriginalUrl : (logoProcessedUrl || logoUrl);
 
   const existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
 
   if (existing) {
     db.prepare(`
       UPDATE businesses 
-      SET logo_url = ?, logo_enabled = ?, logo_enabled_quotations = ?, logo_enabled_invoices = ?, updated_at = ? 
+      SET logo_url = ?, logo_original_url = ?, logo_processed_url = ?, logo_background_mode = ?,
+          logo_enabled = ?, logo_enabled_quotations = ?, logo_enabled_invoices = ?, updated_at = ? 
       WHERE user_id = ?
     `).run(
-      logoUrl,
+      activeLogoUrl,
+      logoOriginalUrl,
+      logoProcessedUrl,
+      logoBackgroundMode,
       logoEnabled ? 1 : 0,
       logoEnabledQuotations ? 1 : 0,
       logoEnabledInvoices ? 1 : 0,
@@ -4128,14 +4159,19 @@ export function updateBusinessLogo(
     const bizId = 'biz_' + crypto.randomUUID().slice(0, 8);
     db.prepare(`
       INSERT INTO businesses (
-        id, user_id, business_name, owner_name, currency, logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?)
+        id, user_id, business_name, owner_name, currency,
+        logo_url, logo_original_url, logo_processed_url, logo_background_mode,
+        logo_enabled, logo_enabled_quotations, logo_enabled_invoices, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       bizId,
       userId,
       user?.business_name || 'My Business',
       user?.name || 'Owner',
-      logoUrl,
+      activeLogoUrl,
+      logoOriginalUrl,
+      logoProcessedUrl,
+      logoBackgroundMode,
       logoEnabled ? 1 : 0,
       logoEnabledQuotations ? 1 : 0,
       logoEnabledInvoices ? 1 : 0,
@@ -4145,7 +4181,56 @@ export function updateBusinessLogo(
   }
 
   logActivity(userId, 'BUSINESS_LOGO_UPDATED', 'Business logo updated', 'USER');
-  return { success: true, logoUrl, logoEnabled, logoEnabledQuotations, logoEnabledInvoices };
+  return {
+    success: true,
+    logoUrl: activeLogoUrl,
+    logoOriginalUrl,
+    logoProcessedUrl,
+    logoBackgroundMode,
+    logoEnabled,
+    logoEnabledQuotations,
+    logoEnabledInvoices,
+  };
+}
+
+/**
+ * Switch between processed transparent logo and original uploaded logo.
+ */
+export function toggleBusinessLogoBackgroundMode(
+  userId: string,
+  mode: 'transparent' | 'original'
+): {
+  success: boolean;
+  logoUrl: string | null;
+  logoBackgroundMode: 'transparent' | 'original';
+} {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url FROM businesses WHERE user_id = ?').get(userId) as any;
+
+  if (!row) {
+    return { success: false, logoUrl: null, logoBackgroundMode: mode };
+  }
+
+  const newActiveUrl = mode === 'original'
+    ? (row.logo_original_url || row.logo_url)
+    : (row.logo_processed_url || row.logo_url);
+
+  db.prepare(`
+    UPDATE businesses 
+    SET logo_url = ?, logo_background_mode = ?, updated_at = ? 
+    WHERE user_id = ?
+  `).run(newActiveUrl, mode, now, userId);
+
+  logActivity(userId, 'BUSINESS_LOGO_MODE_CHANGED', `Business logo background set to ${mode}`, 'USER');
+  return { success: true, logoUrl: newActiveUrl, logoBackgroundMode: mode };
+}
+
+/**
+ * Reset logo to original upload.
+ */
+export function resetBusinessLogoToOriginal(userId: string): { success: boolean; logoUrl: string | null } {
+  return toggleBusinessLogoBackgroundMode(userId, 'original');
 }
 
 /**
@@ -4213,7 +4298,7 @@ export function removeBusinessLogo(userId: string): { success: boolean } {
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE businesses 
-    SET logo_url = NULL, updated_at = ? 
+    SET logo_url = NULL, logo_original_url = NULL, logo_processed_url = NULL, updated_at = ? 
     WHERE user_id = ?
   `).run(now, userId);
 
@@ -4226,15 +4311,21 @@ export function removeBusinessLogo(userId: string): { success: boolean } {
  */
 export function getBusinessLogo(userId: string): {
   logoUrl: string | null;
+  logoOriginalUrl: string | null;
+  logoProcessedUrl: string | null;
+  logoBackgroundMode: 'transparent' | 'original';
   logoEnabled: boolean;
   logoEnabledQuotations: boolean;
   logoEnabledInvoices: boolean;
 } {
   const db = getDatabase();
-  const row = db.prepare('SELECT logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+  const row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
   if (!row) {
     return {
       logoUrl: null,
+      logoOriginalUrl: null,
+      logoProcessedUrl: null,
+      logoBackgroundMode: 'transparent',
       logoEnabled: true,
       logoEnabledQuotations: true,
       logoEnabledInvoices: true,
@@ -4242,6 +4333,9 @@ export function getBusinessLogo(userId: string): {
   }
   return {
     logoUrl: row.logo_url || null,
+    logoOriginalUrl: row.logo_original_url || row.logo_url || null,
+    logoProcessedUrl: row.logo_processed_url || row.logo_url || null,
+    logoBackgroundMode: (row.logo_background_mode as any) || 'transparent',
     logoEnabled: row.logo_enabled !== 0,
     logoEnabledQuotations: row.logo_enabled_quotations !== 0,
     logoEnabledInvoices: row.logo_enabled_invoices !== 0,
@@ -4281,6 +4375,9 @@ export function getBusinessProfileByUserId(userId: string): any | null {
     termsAndConditions: row.terms_and_conditions || '',
     bankDetails,
     logoUrl: row.logo_url || '',
+    logoOriginalUrl: row.logo_original_url || row.logo_url || '',
+    logoProcessedUrl: row.logo_processed_url || row.logo_url || '',
+    logoBackgroundMode: (row.logo_background_mode as any) || 'transparent',
     logoEnabled: row.logo_enabled !== 0,
     logoEnabledQuotations: row.logo_enabled_quotations !== 0,
     logoEnabledInvoices: row.logo_enabled_invoices !== 0,

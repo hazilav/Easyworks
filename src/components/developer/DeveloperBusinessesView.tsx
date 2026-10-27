@@ -172,6 +172,9 @@ export default function DeveloperBusinessesView() {
                                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                   Configured
                                 </span>
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                  {biz.logoBackgroundMode === 'original' ? 'Original BG' : 'Transparent'}
+                                </span>
                               </div>
                               <div className="flex items-center gap-1.5 text-[9px] font-mono">
                                 <span

@@ -67,11 +67,11 @@ export function renderBusinessLogo(
   logoEnabled?: boolean,
   x = 14,
   y = 14,
-  maxWidthMm = 36,
+  maxWidthMm = 38,
   maxHeightMm = 16
-): { rendered: boolean; width: number; height: number } {
+): { rendered: boolean; width: number; height: number; yOffset: number } {
   if (!logoUrl || !logoUrl.trim() || logoEnabled === false) {
-    return { rendered: false, width: 0, height: 0 };
+    return { rendered: false, width: 0, height: 0, yOffset: 0 };
   }
   try {
     let width = maxWidthMm;
@@ -93,11 +93,13 @@ export function renderBusinessLogo(
       // Fallback if image dimensions cannot be parsed directly
     }
 
-    doc.addImage(logoUrl, x, y, width, height);
-    return { rendered: true, width, height };
+    // Center vertically within the logo area without stretching or distorting
+    const yOffset = Math.max(0, (maxHeightMm - height) / 2);
+    doc.addImage(logoUrl, x, y + yOffset, width, height);
+    return { rendered: true, width, height, yOffset };
   } catch (err) {
     console.warn('[pdfGenerator] Failed to render business logo:', err);
-    return { rendered: false, width: 0, height: 0 };
+    return { rendered: false, width: 0, height: 0, yOffset: 0 };
   }
 }
 

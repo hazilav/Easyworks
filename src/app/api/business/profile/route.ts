@@ -34,9 +34,12 @@ export async function POST(req: NextRequest) {
 
     const db = getDatabase();
     const now = new Date().toISOString();
-    const existing = db.prepare('SELECT id, logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+    const existing = db.prepare('SELECT id, logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
 
     const logoUrl = profileData.logoUrl !== undefined ? profileData.logoUrl : (existing?.logo_url ?? '');
+    const logoOriginalUrl = profileData.logoOriginalUrl !== undefined ? profileData.logoOriginalUrl : (existing?.logo_original_url ?? logoUrl);
+    const logoProcessedUrl = profileData.logoProcessedUrl !== undefined ? profileData.logoProcessedUrl : (existing?.logo_processed_url ?? logoUrl);
+    const logoBackgroundMode = profileData.logoBackgroundMode !== undefined ? profileData.logoBackgroundMode : (existing?.logo_background_mode ?? 'transparent');
     const logoEnabled = profileData.logoEnabled !== undefined ? (profileData.logoEnabled ? 1 : 0) : (existing?.logo_enabled ?? 1);
     const logoEnabledQuotations = profileData.logoEnabledQuotations !== undefined ? (profileData.logoEnabledQuotations ? 1 : 0) : (existing?.logo_enabled_quotations ?? logoEnabled);
     const logoEnabledInvoices = profileData.logoEnabledInvoices !== undefined ? (profileData.logoEnabledInvoices ? 1 : 0) : (existing?.logo_enabled_invoices ?? logoEnabled);
@@ -59,6 +62,9 @@ export async function POST(req: NextRequest) {
           terms_and_conditions = ?,
           bank_details_json = ?,
           logo_url = ?,
+          logo_original_url = ?,
+          logo_processed_url = ?,
+          logo_background_mode = ?,
           logo_enabled = ?,
           logo_enabled_quotations = ?,
           logo_enabled_invoices = ?,
@@ -80,6 +86,9 @@ export async function POST(req: NextRequest) {
         profileData.termsAndConditions || '',
         profileData.bankDetails ? JSON.stringify(profileData.bankDetails) : null,
         logoUrl,
+        logoOriginalUrl,
+        logoProcessedUrl,
+        logoBackgroundMode,
         logoEnabled,
         logoEnabledQuotations,
         logoEnabledInvoices,
@@ -93,9 +102,10 @@ export async function POST(req: NextRequest) {
           id, user_id, business_name, owner_name, tagline, phone, email, website, address,
           tax_number, currency, default_tax_percentage, default_payment_terms,
           default_validity_days, terms_and_conditions, bank_details_json,
-          logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices,
+          logo_url, logo_original_url, logo_processed_url, logo_background_mode,
+          logo_enabled, logo_enabled_quotations, logo_enabled_invoices,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         bizId,
         userId,
@@ -114,6 +124,9 @@ export async function POST(req: NextRequest) {
         profileData.termsAndConditions || '',
         profileData.bankDetails ? JSON.stringify(profileData.bankDetails) : null,
         logoUrl,
+        logoOriginalUrl,
+        logoProcessedUrl,
+        logoBackgroundMode,
         logoEnabled,
         logoEnabledQuotations,
         logoEnabledInvoices,

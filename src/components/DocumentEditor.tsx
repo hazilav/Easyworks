@@ -1428,11 +1428,13 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
                   (isQuotation
                     ? (docData.business.logoEnabledQuotations ?? docData.business.logoEnabled ?? true)
                     : (docData.business.logoEnabledInvoices ?? docData.business.logoEnabled ?? true)) ? (
-                    <img
-                      src={docData.business.logoUrl}
-                      alt={docData.business.businessName || 'Business Logo'}
-                      className="max-h-[60px] max-w-[150px] object-contain object-left mb-2 rounded"
-                    />
+                    <div className="h-[65px] max-w-[150px] flex items-center justify-start mb-2">
+                      <img
+                        src={docData.business.logoUrl}
+                        alt={docData.business.businessName || 'Business Logo'}
+                        className="max-h-[65px] max-w-[150px] object-contain object-left"
+                      />
+                    </div>
                   ) : (
                     <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-1">
                       {docData.business?.businessName || 'Business Name'}

@@ -16,6 +16,9 @@ import {
   AlertCircle,
   X,
   RefreshCw,
+  Sparkles,
+  Wand2,
+  RotateCcw,
 } from 'lucide-react';
 import { CURRENCY_SYMBOLS } from '@/lib/calculator';
 
@@ -88,73 +91,106 @@ export default function BusinessProfileView() {
 
     setLogoUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const dataUrl = e.target?.result as string;
-        if (!dataUrl) {
-          setLogoError('Failed to read image file.');
-          setLogoUploading(false);
-          return;
-        }
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      uploadData.append('userId', currentUser?.id || '');
+      uploadData.append('logoEnabled', String(formData.logoEnabled ?? true));
+      uploadData.append('logoEnabledQuotations', String(formData.logoEnabledQuotations ?? true));
+      uploadData.append('logoEnabledInvoices', String(formData.logoEnabledInvoices ?? true));
 
-        // Measure natural dimensions
-        const img = new Image();
-        img.onload = async () => {
-          setLogoDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+      const res = await fetch('/api/business/logo', {
+        method: 'POST',
+        body: uploadData,
+      });
 
-          const quotesEnabled = formData.logoEnabledQuotations ?? formData.logoEnabled ?? true;
-          const invoicesEnabled = formData.logoEnabledInvoices ?? formData.logoEnabled ?? true;
-
-          // Update local form state immediately
-          const updated = {
-            ...formData,
-            logoUrl: dataUrl,
-            logoEnabled: true,
-            logoEnabledQuotations: quotesEnabled,
-            logoEnabledInvoices: invoicesEnabled,
-          };
-          setFormData(updated);
-          updateBusiness(updated);
-
-          // If user is logged in, sync with server-side database
-          if (currentUser?.id) {
-            try {
-              const res = await fetch('/api/business/logo', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  userId: currentUser.id,
-                  logoUrl: dataUrl,
-                  logoEnabled: true,
-                  logoEnabledQuotations: quotesEnabled,
-                  logoEnabledInvoices: invoicesEnabled,
-                }),
-              });
-              const resData = await res.json();
-              if (!resData.success) {
-                console.warn('Server logo sync response:', resData);
-              }
-            } catch (apiErr) {
-              console.error('Failed to sync logo to backend:', apiErr);
-            }
-          }
-
-          setLogoUploading(false);
-        };
-        img.onerror = () => {
-          setLogoError('Failed to decode image.');
-          setLogoUploading(false);
-        };
-        img.src = dataUrl;
-      };
-      reader.onerror = () => {
-        setLogoError('Failed to read file.');
+      const resData = await res.json();
+      if (!resData.success) {
+        setLogoError(resData.error || 'Failed to process logo.');
         setLogoUploading(false);
+        return;
+      }
+
+      const quotesEnabled = formData.logoEnabledQuotations ?? formData.logoEnabled ?? true;
+      const invoicesEnabled = formData.logoEnabledInvoices ?? formData.logoEnabled ?? true;
+
+      const updated = {
+        ...formData,
+        logoUrl: resData.logoUrl,
+        logoOriginalUrl: resData.logoOriginalUrl,
+        logoProcessedUrl: resData.logoProcessedUrl,
+        logoBackgroundMode: resData.logoBackgroundMode || 'transparent',
+        logoEnabled: true,
+        logoEnabledQuotations: quotesEnabled,
+        logoEnabledInvoices: invoicesEnabled,
       };
-      reader.readAsDataURL(file);
+
+      setFormData(updated);
+      updateBusiness(updated);
+
+      if (resData.processedDimensions) {
+        setLogoDimensions(resData.processedDimensions);
+      }
+
+      setLogoUploading(false);
     } catch (err: any) {
+      console.error('Error uploading logo:', err);
       setLogoError(err?.message || 'Error processing image.');
       setLogoUploading(false);
+    }
+  };
+
+  const handleSelectBackgroundMode = async (mode: 'transparent' | 'original') => {
+    const targetUrl = mode === 'original'
+      ? (formData.logoOriginalUrl || formData.logoUrl)
+      : (formData.logoProcessedUrl || formData.logoUrl);
+
+    const updated = {
+      ...formData,
+      logoUrl: targetUrl,
+      logoBackgroundMode: mode,
+    };
+    setFormData(updated);
+    updateBusiness(updated);
+
+    if (currentUser?.id) {
+      try {
+        await fetch('/api/business/logo', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            mode,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to change logo background mode:', err);
+      }
+    }
+  };
+
+  const handleResetToOriginal = async () => {
+    if (!formData.logoOriginalUrl) return;
+    const updated = {
+      ...formData,
+      logoUrl: formData.logoOriginalUrl,
+      logoBackgroundMode: 'original' as const,
+    };
+    setFormData(updated);
+    updateBusiness(updated);
+
+    if (currentUser?.id) {
+      try {
+        await fetch('/api/business/logo', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            resetToOriginal: true,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to reset logo:', err);
+      }
     }
   };
 
@@ -339,54 +375,162 @@ export default function BusinessProfileView() {
 
           {hasLogo ? (
             /* Logo Uploaded State: Preview & Controls */
-            <div className="space-y-4">
-              <div className="flex flex-col md:flex-row items-center gap-6 p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700/60">
-                {/* Logo Preview Frame */}
-                <div className="w-48 h-24 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-2.5 overflow-hidden shadow-2xs">
-                  <img
-                    src={formData.logoUrl}
-                    alt={formData.businessName || 'Business Logo'}
-                    className="max-h-full max-w-full object-contain"
-                  />
+            <div className="space-y-5">
+              {/* Sizing & Background Optimization Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-purple-50/60 dark:bg-purple-950/20 p-3 rounded-xl border border-purple-100 dark:border-purple-900/40">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <span className="text-xs font-semibold text-purple-950 dark:text-purple-200">
+                    Automatic Background Removal & Best-Fit Sizing
+                  </span>
                 </div>
+                <span className="text-[11px] text-purple-700 dark:text-purple-300 font-medium">
+                  Optimized for 150 × 65 px header space
+                </span>
+              </div>
 
-                {/* Logo Info & Actions */}
-                <div className="flex-1 space-y-2 text-center md:text-left">
-                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                    <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
-                      Uploaded Logo
+              {/* Side-by-Side Before / After Previews */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Processed Transparent Logo */}
+                <div
+                  onClick={() => handleSelectBackgroundMode('transparent')}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-3 ${
+                    (formData.logoBackgroundMode ?? 'transparent') === 'transparent'
+                      ? 'bg-white dark:bg-zinc-900 border-purple-500 shadow-sm ring-2 ring-purple-500/20'
+                      : 'bg-slate-50/70 dark:bg-zinc-800/40 border-slate-200 dark:border-zinc-700/60 hover:border-purple-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5">
+                      <Wand2 className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Transparent (Background Removed)</span>
                     </span>
-                    {logoDimensions && (
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300">
-                        {logoDimensions.width} × {logoDimensions.height} px
+                    {(formData.logoBackgroundMode ?? 'transparent') === 'transparent' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">
+                        Active in Docs
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">
-                    Scaled proportionally up to 150×65 px on document headers with original aspect ratio preserved.
-                  </p>
 
-                  {/* Action Buttons */}
-                  <div className="flex items-center justify-center md:justify-start gap-2.5 pt-1">
+                  {/* Frame with checkerboard transparency grid */}
+                  <div className="h-28 rounded-lg bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-3 relative overflow-hidden bg-[radial-gradient(#cbd5e1_1.5px,transparent_1.5px)] [background-size:12px_12px] dark:bg-[radial-gradient(#3f3f46_1.5px,transparent_1.5px)]">
+                    <img
+                      src={formData.logoProcessedUrl || formData.logoUrl}
+                      alt="Transparent Processed Logo"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
+                    <span>Edges smoothed & padding trimmed</span>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={logoUploading}
-                      className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                        (formData.logoBackgroundMode ?? 'transparent') === 'transparent'
+                          ? 'bg-purple-600 text-white border-purple-600'
+                          : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-600'
+                      }`}
                     >
-                      {logoUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                      <span>Replace Logo</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowRemoveModal(true)}
-                      className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-zinc-600 hover:border-rose-200 dark:hover:border-rose-800 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Remove Logo</span>
+                      {(formData.logoBackgroundMode ?? 'transparent') === 'transparent' ? 'Selected' : 'Use Transparent'}
                     </button>
                   </div>
+                </div>
+
+                {/* 2. Original Upload */}
+                <div
+                  onClick={() => handleSelectBackgroundMode('original')}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-3 ${
+                    formData.logoBackgroundMode === 'original'
+                      ? 'bg-white dark:bg-zinc-900 border-purple-500 shadow-sm ring-2 ring-purple-500/20'
+                      : 'bg-slate-50/70 dark:bg-zinc-800/40 border-slate-200 dark:border-zinc-700/60 hover:border-purple-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Original Upload (Keeps Background)</span>
+                    </span>
+                    {formData.logoBackgroundMode === 'original' && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">
+                        Active in Docs
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Frame showing original */}
+                  <div className="h-28 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-3 overflow-hidden shadow-2xs">
+                    <img
+                      src={formData.logoOriginalUrl || formData.logoUrl}
+                      alt="Original Logo Upload"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
+                    <span>Unmodified source file</span>
+                    <button
+                      type="button"
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                        formData.logoBackgroundMode === 'original'
+                          ? 'bg-purple-600 text-white border-purple-600'
+                          : 'bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-600'
+                      }`}
+                    >
+                      {formData.logoBackgroundMode === 'original' ? 'Selected' : 'Use Original'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700/60">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
+                    Active Logo:
+                  </span>
+                  <span className="text-xs font-bold text-purple-600 dark:text-purple-400">
+                    {(formData.logoBackgroundMode ?? 'transparent') === 'transparent'
+                      ? 'Transparent PNG'
+                      : 'Original Background'}
+                  </span>
+                  {logoDimensions && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300">
+                      {logoDimensions.width} × {logoDimensions.height} px
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {logoUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>Replace Logo</span>
+                  </button>
+
+                  {formData.logoOriginalUrl && formData.logoBackgroundMode !== 'original' && (
+                    <button
+                      type="button"
+                      onClick={handleResetToOriginal}
+                      className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Reset to original upload with background"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset to Original</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowRemoveModal(true)}
+                    className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-zinc-600 hover:border-rose-200 dark:hover:border-rose-800 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
                 </div>
               </div>
 
