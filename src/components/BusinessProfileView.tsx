@@ -48,11 +48,26 @@ export default function BusinessProfileView() {
     }
   }, [business]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     updateBusiness(formData);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2500);
+
+    if (currentUser?.id) {
+      try {
+        await fetch('/api/business/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            ...formData,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save business profile to server:', err);
+      }
+    }
   };
 
   const handleFileProcess = async (file: File) => {
@@ -87,11 +102,16 @@ export default function BusinessProfileView() {
         img.onload = async () => {
           setLogoDimensions({ width: img.naturalWidth, height: img.naturalHeight });
 
+          const quotesEnabled = formData.logoEnabledQuotations ?? formData.logoEnabled ?? true;
+          const invoicesEnabled = formData.logoEnabledInvoices ?? formData.logoEnabled ?? true;
+
           // Update local form state immediately
           const updated = {
             ...formData,
             logoUrl: dataUrl,
-            logoEnabled: formData.logoEnabled ?? true,
+            logoEnabled: true,
+            logoEnabledQuotations: quotesEnabled,
+            logoEnabledInvoices: invoicesEnabled,
           };
           setFormData(updated);
           updateBusiness(updated);
@@ -105,7 +125,9 @@ export default function BusinessProfileView() {
                 body: JSON.stringify({
                   userId: currentUser.id,
                   logoUrl: dataUrl,
-                  logoEnabled: formData.logoEnabled ?? true,
+                  logoEnabled: true,
+                  logoEnabledQuotations: quotesEnabled,
+                  logoEnabledInvoices: invoicesEnabled,
                 }),
               });
               const resData = await res.json();
@@ -156,9 +178,10 @@ export default function BusinessProfileView() {
     }
   };
 
-  const handleToggleLogoVisibility = async () => {
-    const newEnabled = !(formData.logoEnabled ?? true);
-    const updated = { ...formData, logoEnabled: newEnabled };
+  const handleToggleQuotationsLogo = async () => {
+    const currentVal = formData.logoEnabledQuotations ?? formData.logoEnabled ?? true;
+    const newEnabled = !currentVal;
+    const updated = { ...formData, logoEnabledQuotations: newEnabled };
     setFormData(updated);
     updateBusiness(updated);
 
@@ -169,11 +192,36 @@ export default function BusinessProfileView() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId: currentUser.id,
-            logoEnabled: newEnabled,
+            target: 'quotations',
+            enabled: newEnabled,
           }),
         });
       } catch (err) {
-        console.error('Failed to update logo visibility on server:', err);
+        console.error('Failed to update quotations logo visibility on server:', err);
+      }
+    }
+  };
+
+  const handleToggleInvoicesLogo = async () => {
+    const currentVal = formData.logoEnabledInvoices ?? formData.logoEnabled ?? true;
+    const newEnabled = !currentVal;
+    const updated = { ...formData, logoEnabledInvoices: newEnabled };
+    setFormData(updated);
+    updateBusiness(updated);
+
+    if (currentUser?.id) {
+      try {
+        await fetch('/api/business/logo', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            target: 'invoices',
+            enabled: newEnabled,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to update invoices logo visibility on server:', err);
       }
     }
   };
@@ -199,7 +247,8 @@ export default function BusinessProfileView() {
   };
 
   const hasLogo = Boolean(formData.logoUrl && formData.logoUrl.trim().length > 0);
-  const isLogoEnabled = formData.logoEnabled ?? true;
+  const isQuotesLogoEnabled = formData.logoEnabledQuotations ?? formData.logoEnabled ?? true;
+  const isInvoicesLogoEnabled = formData.logoEnabledInvoices ?? formData.logoEnabled ?? true;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#f8fafc] dark:bg-[#090d16] text-slate-900 dark:text-slate-100 overflow-y-auto p-4 sm:p-6 md:p-8 font-sans">
@@ -249,29 +298,25 @@ export default function BusinessProfileView() {
             </div>
 
             {hasLogo && (
-              <div className="flex items-center gap-2 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={handleToggleLogoVisibility}
-                  className={`h-8 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                    isLogoEnabled
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                      : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                    isQuotesLogoEnabled
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                      : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700'
                   }`}
-                  title="Toggle whether logo appears on quotations and invoices"
                 >
-                  {isLogoEnabled ? (
-                    <>
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Logo Visible</span>
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="w-3.5 h-3.5" />
-                      <span>Logo Hidden</span>
-                    </>
-                  )}
-                </button>
+                  Quotes: {isQuotesLogoEnabled ? 'ON' : 'OFF'}
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                    isInvoicesLogoEnabled
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                      : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700'
+                  }`}
+                >
+                  Invoices: {isInvoicesLogoEnabled ? 'ON' : 'OFF'}
+                </span>
               </div>
             )}
           </div>
@@ -294,61 +339,144 @@ export default function BusinessProfileView() {
 
           {hasLogo ? (
             /* Logo Uploaded State: Preview & Controls */
-            <div className="flex flex-col md:flex-row items-center gap-6 p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700/60">
-              {/* Logo Preview Frame */}
-              <div className="w-48 h-24 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-2.5 overflow-hidden shadow-2xs">
-                <img
-                  src={formData.logoUrl}
-                  alt={formData.businessName || 'Business Logo'}
-                  className="max-h-full max-w-full object-contain"
-                />
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row items-center gap-6 p-4 rounded-xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700/60">
+                {/* Logo Preview Frame */}
+                <div className="w-48 h-24 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 flex items-center justify-center p-2.5 overflow-hidden shadow-2xs">
+                  <img
+                    src={formData.logoUrl}
+                    alt={formData.businessName || 'Business Logo'}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                </div>
+
+                {/* Logo Info & Actions */}
+                <div className="flex-1 space-y-2 text-center md:text-left">
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                    <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
+                      Uploaded Logo
+                    </span>
+                    {logoDimensions && (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300">
+                        {logoDimensions.width} × {logoDimensions.height} px
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Scaled proportionally up to 150×65 px on document headers with original aspect ratio preserved.
+                  </p>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-center md:justify-start gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={logoUploading}
+                      className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      {logoUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>Replace Logo</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowRemoveModal(true)}
+                      className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-zinc-600 hover:border-rose-200 dark:hover:border-rose-800 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Remove Logo</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {/* Logo Info & Actions */}
-              <div className="flex-1 space-y-2 text-center md:text-left">
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                  <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">
-                    Uploaded Logo
+              {/* Independent Document Controls */}
+              <div className="p-4 rounded-xl bg-slate-50/70 dark:bg-zinc-800/30 border border-slate-200 dark:border-zinc-700/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-200/60 dark:border-zinc-700/60 pb-2.5">
+                  <span className="text-xs font-bold text-slate-900 dark:text-zinc-100">
+                    Document Visibility Controls
                   </span>
-                  {logoDimensions && (
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300">
-                      {logoDimensions.width} × {logoDimensions.height} px
-                    </span>
-                  )}
-                  <span
-                    className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                      isLogoEnabled
-                        ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200'
-                        : 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200'
-                    }`}
-                  >
-                    {isLogoEnabled ? 'Active on documents' : 'Hidden on documents'}
+                  <span className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Control logo appearance separately for each document type
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-zinc-400">
-                  Scaled proportionally up to 160×70 px on document headers with aspect-ratio preserved.
-                </p>
 
-                {/* Action Buttons */}
-                <div className="flex items-center justify-center md:justify-start gap-2.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={logoUploading}
-                    className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    {logoUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                    <span>Replace Logo</span>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Quotations Control */}
+                  <div className={`p-3.5 rounded-xl border transition-all flex items-center justify-between ${
+                    isQuotesLogoEnabled
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60'
+                      : 'bg-white dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-700/60'
+                  }`}>
+                    <div className="space-y-0.5 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 dark:text-zinc-100">Quotations</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
+                          isQuotesLogoEnabled
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300'
+                            : 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-400'
+                        }`}>
+                          {isQuotesLogoEnabled ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        Show logo on quotation drafts, previews & PDFs
+                      </p>
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowRemoveModal(true)}
-                    className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-zinc-600 hover:border-rose-200 dark:hover:border-rose-800 rounded-lg text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Remove</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleToggleQuotationsLogo}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out shrink-0 ${
+                        isQuotesLogoEnabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-zinc-700'
+                      }`}
+                      aria-label="Toggle logo on quotations"
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                          isQuotesLogoEnabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Invoices Control */}
+                  <div className={`p-3.5 rounded-xl border transition-all flex items-center justify-between ${
+                    isInvoicesLogoEnabled
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60'
+                      : 'bg-white dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-700/60'
+                  }`}>
+                    <div className="space-y-0.5 pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 dark:text-zinc-100">Invoices</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider ${
+                          isInvoicesLogoEnabled
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300'
+                            : 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-400'
+                        }`}>
+                          {isInvoicesLogoEnabled ? 'ON' : 'OFF'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        Show logo on invoice drafts, previews & PDFs
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleInvoicesLogo}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-200 ease-in-out shrink-0 ${
+                        isInvoicesLogoEnabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-zinc-700'
+                      }`}
+                      aria-label="Toggle logo on invoices"
+                    >
+                      <div
+                        className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                          isInvoicesLogoEnabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

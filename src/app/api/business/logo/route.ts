@@ -104,6 +104,8 @@ export async function POST(req: NextRequest) {
     let userId = '';
     let logoDataUrl = '';
     let logoEnabled = true;
+    let logoEnabledQuotations = true;
+    let logoEnabledInvoices = true;
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData();
@@ -111,6 +113,18 @@ export async function POST(req: NextRequest) {
       const enabledVal = formData.get('logoEnabled');
       if (enabledVal !== null && enabledVal !== undefined) {
         logoEnabled = enabledVal === 'true' || enabledVal === '1';
+      }
+      const enabledQuotesVal = formData.get('logoEnabledQuotations');
+      if (enabledQuotesVal !== null && enabledQuotesVal !== undefined) {
+        logoEnabledQuotations = enabledQuotesVal === 'true' || enabledQuotesVal === '1';
+      } else {
+        logoEnabledQuotations = logoEnabled;
+      }
+      const enabledInvoicesVal = formData.get('logoEnabledInvoices');
+      if (enabledInvoicesVal !== null && enabledInvoicesVal !== undefined) {
+        logoEnabledInvoices = enabledInvoicesVal === 'true' || enabledInvoicesVal === '1';
+      } else {
+        logoEnabledInvoices = logoEnabled;
       }
 
       const file = formData.get('file') as File | null;
@@ -137,6 +151,16 @@ export async function POST(req: NextRequest) {
       userId = body.userId || '';
       if (body.logoEnabled !== undefined) {
         logoEnabled = Boolean(body.logoEnabled);
+      }
+      if (body.logoEnabledQuotations !== undefined) {
+        logoEnabledQuotations = Boolean(body.logoEnabledQuotations);
+      } else {
+        logoEnabledQuotations = logoEnabled;
+      }
+      if (body.logoEnabledInvoices !== undefined) {
+        logoEnabledInvoices = Boolean(body.logoEnabledInvoices);
+      } else {
+        logoEnabledInvoices = logoEnabled;
       }
 
       const rawDataUrl = body.logoDataUrl || body.logoUrl || '';
@@ -177,11 +201,17 @@ export async function POST(req: NextRequest) {
       return apiNotFound('User not found.');
     }
 
-    const result = updateBusinessLogo(userId, logoDataUrl, logoEnabled);
+    const result = updateBusinessLogo(userId, logoDataUrl, {
+      logoEnabled,
+      logoEnabledQuotations,
+      logoEnabledInvoices,
+    });
     return apiSuccess({
       message: 'Business logo uploaded successfully.',
       logoUrl: result.logoUrl,
       logoEnabled: result.logoEnabled,
+      logoEnabledQuotations: result.logoEnabledQuotations,
+      logoEnabledInvoices: result.logoEnabledInvoices,
     });
   } catch (error: any) {
     console.error('[POST /api/business/logo] Error:', error);
@@ -191,19 +221,15 @@ export async function POST(req: NextRequest) {
 
 /**
  * PATCH /api/business/logo
- * Toggles logo visibility on documents.
+ * Toggles logo visibility on documents (can toggle quotes, invoices, or all).
  */
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, logoEnabled } = body;
+    const { userId, target, enabled, logoEnabled, logoEnabledQuotations, logoEnabledInvoices } = body;
 
     if (!userId || typeof userId !== 'string') {
       return apiBadRequest('User ID is required.');
-    }
-
-    if (logoEnabled === undefined || typeof logoEnabled !== 'boolean') {
-      return apiBadRequest('logoEnabled boolean flag is required.');
     }
 
     const user = getUserById(userId);
@@ -211,10 +237,25 @@ export async function PATCH(req: NextRequest) {
       return apiNotFound('User not found.');
     }
 
-    const result = toggleBusinessLogo(userId, logoEnabled);
+    let result;
+    if (target === 'quotations' || target === 'invoices' || target === 'all') {
+      const isEnabled = enabled !== undefined ? Boolean(enabled) : true;
+      result = toggleBusinessLogo(userId, target, isEnabled);
+    } else if (logoEnabledQuotations !== undefined) {
+      result = toggleBusinessLogo(userId, 'quotations', Boolean(logoEnabledQuotations));
+    } else if (logoEnabledInvoices !== undefined) {
+      result = toggleBusinessLogo(userId, 'invoices', Boolean(logoEnabledInvoices));
+    } else if (logoEnabled !== undefined) {
+      result = toggleBusinessLogo(userId, 'all', Boolean(logoEnabled));
+    } else {
+      return apiBadRequest('Please provide target (quotations/invoices/all) and enabled boolean, or specific flag.');
+    }
+
     return apiSuccess({
-      message: `Logo visibility updated to ${logoEnabled ? 'enabled' : 'disabled'}.`,
+      message: 'Logo visibility updated successfully.',
       logoEnabled: result.logoEnabled,
+      logoEnabledQuotations: result.logoEnabledQuotations,
+      logoEnabledInvoices: result.logoEnabledInvoices,
     });
   } catch (error: any) {
     console.error('[PATCH /api/business/logo] Error:', error);

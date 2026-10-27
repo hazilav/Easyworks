@@ -1425,7 +1425,9 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
                 <div className="max-w-[62%] flex flex-col items-start space-y-1">
                   {docData.business?.logoUrl &&
                   docData.business.logoUrl.trim().length > 0 &&
-                  docData.business.logoEnabled !== false ? (
+                  (isQuotation
+                    ? (docData.business.logoEnabledQuotations ?? docData.business.logoEnabled ?? true)
+                    : (docData.business.logoEnabledInvoices ?? docData.business.logoEnabled ?? true)) ? (
                     <img
                       src={docData.business.logoUrl}
                       alt={docData.business.businessName || 'Business Logo'}

@@ -343,6 +343,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (parsedInvoices) setInvoices(parsedInvoices);
       else setInvoices([]);
 
+      // Sync cloud business profile
+      safeFetchJson(`/api/business/profile?userId=${userId}`)
+        .then((data) => {
+          if (data && data.success && data.profile) {
+            const p = data.profile;
+            setBusiness((prev) => ({
+              ...prev,
+              ...p,
+              logoUrl: p.logoUrl !== undefined ? p.logoUrl : prev.logoUrl,
+              logoEnabled: p.logoEnabled !== undefined ? p.logoEnabled : prev.logoEnabled,
+              logoEnabledQuotations: p.logoEnabledQuotations !== undefined ? p.logoEnabledQuotations : (p.logoEnabled ?? prev.logoEnabledQuotations),
+              logoEnabledInvoices: p.logoEnabledInvoices !== undefined ? p.logoEnabledInvoices : (p.logoEnabled ?? prev.logoEnabledInvoices),
+            }));
+          }
+        })
+        .catch(() => {});
+
       // Sync cloud documents
       safeFetchJson(`/api/documents?userId=${userId}`)
         .then((data) => {

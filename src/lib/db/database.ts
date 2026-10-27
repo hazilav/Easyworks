@@ -172,6 +172,8 @@ function initDatabase(db: DatabaseSync) {
       currency TEXT NOT NULL DEFAULT 'INR',
       logo_url TEXT,
       logo_enabled INTEGER NOT NULL DEFAULT 1,
+      logo_enabled_quotations INTEGER NOT NULL DEFAULT 1,
+      logo_enabled_invoices INTEGER NOT NULL DEFAULT 1,
       tagline TEXT,
       phone TEXT,
       email TEXT,
@@ -482,6 +484,8 @@ function initDatabase(db: DatabaseSync) {
   // Safe migrations for businesses table
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_url TEXT;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled INTEGER NOT NULL DEFAULT 1;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled_quotations INTEGER NOT NULL DEFAULT 1;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_enabled_invoices INTEGER NOT NULL DEFAULT 1;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN tagline TEXT;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN phone TEXT;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN email TEXT;'); } catch {}
@@ -3962,6 +3966,8 @@ export function getAllBusinessesOverview(): any[] {
       b.currency,
       b.logo_url,
       b.logo_enabled,
+      b.logo_enabled_quotations,
+      b.logo_enabled_invoices,
       s.status as subscription_status,
       s.plan_id,
       p.name as plan_name,
@@ -3987,7 +3993,9 @@ export function getAllBusinessesOverview(): any[] {
     currency: r.currency || 'INR',
     hasLogo: Boolean(r.logo_url && r.logo_url.trim().length > 0),
     logoUrl: r.logo_url || null,
-    logoEnabled: r.logo_enabled === 1,
+    logoEnabled: r.logo_enabled !== 0,
+    logoEnabledQuotations: r.logo_enabled_quotations !== 0,
+    logoEnabledInvoices: r.logo_enabled_invoices !== 0,
     createdAt: r.created_at,
     subscriptionStatus: r.subscription_status || 'TRIALING',
     planName: r.plan_name || 'Free Trial',
@@ -4068,24 +4076,60 @@ export function getAllDocumentsOverview(typeFilter?: 'all' | 'quotations' | 'inv
 /**
  * Update or insert business logo for a user.
  */
-export function updateBusinessLogo(userId: string, logoUrl: string, logoEnabled = true): { success: boolean; logoUrl: string; logoEnabled: boolean } {
+export function updateBusinessLogo(
+  userId: string,
+  logoUrl: string,
+  options?: {
+    logoEnabled?: boolean;
+    logoEnabledQuotations?: boolean;
+    logoEnabledInvoices?: boolean;
+  } | boolean
+): {
+  success: boolean;
+  logoUrl: string;
+  logoEnabled: boolean;
+  logoEnabledQuotations: boolean;
+  logoEnabledInvoices: boolean;
+} {
   const db = getDatabase();
   const now = new Date().toISOString();
+
+  let logoEnabled = true;
+  let logoEnabledQuotations = true;
+  let logoEnabledInvoices = true;
+
+  if (typeof options === 'boolean') {
+    logoEnabled = options;
+    logoEnabledQuotations = options;
+    logoEnabledInvoices = options;
+  } else if (typeof options === 'object' && options !== null) {
+    logoEnabled = options.logoEnabled ?? true;
+    logoEnabledQuotations = options.logoEnabledQuotations ?? logoEnabled;
+    logoEnabledInvoices = options.logoEnabledInvoices ?? logoEnabled;
+  }
+
   const existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
 
   if (existing) {
     db.prepare(`
       UPDATE businesses 
-      SET logo_url = ?, logo_enabled = ?, updated_at = ? 
+      SET logo_url = ?, logo_enabled = ?, logo_enabled_quotations = ?, logo_enabled_invoices = ?, updated_at = ? 
       WHERE user_id = ?
-    `).run(logoUrl, logoEnabled ? 1 : 0, now, userId);
+    `).run(
+      logoUrl,
+      logoEnabled ? 1 : 0,
+      logoEnabledQuotations ? 1 : 0,
+      logoEnabledInvoices ? 1 : 0,
+      now,
+      userId
+    );
   } else {
     const user = db.prepare('SELECT name, business_name FROM users WHERE id = ?').get(userId) as any;
     const bizId = 'biz_' + crypto.randomUUID().slice(0, 8);
     db.prepare(`
       INSERT INTO businesses (
-        id, user_id, business_name, owner_name, currency, logo_url, logo_enabled, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?)
+        id, user_id, business_name, owner_name, currency, logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?)
     `).run(
       bizId,
       userId,
@@ -4093,29 +4137,72 @@ export function updateBusinessLogo(userId: string, logoUrl: string, logoEnabled 
       user?.name || 'Owner',
       logoUrl,
       logoEnabled ? 1 : 0,
+      logoEnabledQuotations ? 1 : 0,
+      logoEnabledInvoices ? 1 : 0,
       now,
       now
     );
   }
 
   logActivity(userId, 'BUSINESS_LOGO_UPDATED', 'Business logo updated', 'USER');
-  return { success: true, logoUrl, logoEnabled };
+  return { success: true, logoUrl, logoEnabled, logoEnabledQuotations, logoEnabledInvoices };
 }
 
 /**
  * Toggle business logo visibility on documents for a user.
  */
-export function toggleBusinessLogo(userId: string, logoEnabled: boolean): { success: boolean; logoEnabled: boolean } {
+export function toggleBusinessLogo(
+  userId: string,
+  targetOrEnabled: 'all' | 'quotations' | 'invoices' | boolean,
+  specificEnabled?: boolean
+): {
+  success: boolean;
+  logoEnabled: boolean;
+  logoEnabledQuotations: boolean;
+  logoEnabledInvoices: boolean;
+} {
   const db = getDatabase();
   const now = new Date().toISOString();
+  const current = getBusinessLogo(userId);
+
+  let newLogoEnabled = current.logoEnabled;
+  let newLogoEnabledQuotations = current.logoEnabledQuotations;
+  let newLogoEnabledInvoices = current.logoEnabledInvoices;
+
+  if (typeof targetOrEnabled === 'boolean') {
+    newLogoEnabled = targetOrEnabled;
+    newLogoEnabledQuotations = targetOrEnabled;
+    newLogoEnabledInvoices = targetOrEnabled;
+  } else if (targetOrEnabled === 'quotations') {
+    newLogoEnabledQuotations = specificEnabled ?? !current.logoEnabledQuotations;
+  } else if (targetOrEnabled === 'invoices') {
+    newLogoEnabledInvoices = specificEnabled ?? !current.logoEnabledInvoices;
+  } else if (targetOrEnabled === 'all') {
+    const val = specificEnabled ?? !current.logoEnabled;
+    newLogoEnabled = val;
+    newLogoEnabledQuotations = val;
+    newLogoEnabledInvoices = val;
+  }
+
   db.prepare(`
     UPDATE businesses 
-    SET logo_enabled = ?, updated_at = ? 
+    SET logo_enabled = ?, logo_enabled_quotations = ?, logo_enabled_invoices = ?, updated_at = ? 
     WHERE user_id = ?
-  `).run(logoEnabled ? 1 : 0, now, userId);
+  `).run(
+    newLogoEnabled ? 1 : 0,
+    newLogoEnabledQuotations ? 1 : 0,
+    newLogoEnabledInvoices ? 1 : 0,
+    now,
+    userId
+  );
 
-  logActivity(userId, 'BUSINESS_LOGO_TOGGLED', `Business logo visibility set to ${logoEnabled ? 'enabled' : 'disabled'}`, 'USER');
-  return { success: true, logoEnabled };
+  logActivity(userId, 'BUSINESS_LOGO_TOGGLED', `Business logo visibility updated (Quotes: ${newLogoEnabledQuotations ? 'ON' : 'OFF'}, Invoices: ${newLogoEnabledInvoices ? 'ON' : 'OFF'})`, 'USER');
+  return {
+    success: true,
+    logoEnabled: newLogoEnabled,
+    logoEnabledQuotations: newLogoEnabledQuotations,
+    logoEnabledInvoices: newLogoEnabledInvoices,
+  };
 }
 
 /**
@@ -4137,15 +4224,27 @@ export function removeBusinessLogo(userId: string): { success: boolean } {
 /**
  * Get business logo status for a user.
  */
-export function getBusinessLogo(userId: string): { logoUrl: string | null; logoEnabled: boolean } {
+export function getBusinessLogo(userId: string): {
+  logoUrl: string | null;
+  logoEnabled: boolean;
+  logoEnabledQuotations: boolean;
+  logoEnabledInvoices: boolean;
+} {
   const db = getDatabase();
-  const row = db.prepare('SELECT logo_url, logo_enabled FROM businesses WHERE user_id = ?').get(userId) as any;
+  const row = db.prepare('SELECT logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
   if (!row) {
-    return { logoUrl: null, logoEnabled: true };
+    return {
+      logoUrl: null,
+      logoEnabled: true,
+      logoEnabledQuotations: true,
+      logoEnabledInvoices: true,
+    };
   }
   return {
     logoUrl: row.logo_url || null,
     logoEnabled: row.logo_enabled !== 0,
+    logoEnabledQuotations: row.logo_enabled_quotations !== 0,
+    logoEnabledInvoices: row.logo_enabled_invoices !== 0,
   };
 }
 
@@ -4183,6 +4282,8 @@ export function getBusinessProfileByUserId(userId: string): any | null {
     bankDetails,
     logoUrl: row.logo_url || '',
     logoEnabled: row.logo_enabled !== 0,
+    logoEnabledQuotations: row.logo_enabled_quotations !== 0,
+    logoEnabledInvoices: row.logo_enabled_invoices !== 0,
   };
 }
 

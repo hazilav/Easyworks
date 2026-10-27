@@ -34,7 +34,12 @@ export async function POST(req: NextRequest) {
 
     const db = getDatabase();
     const now = new Date().toISOString();
-    const existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
+    const existing = db.prepare('SELECT id, logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+
+    const logoUrl = profileData.logoUrl !== undefined ? profileData.logoUrl : (existing?.logo_url ?? '');
+    const logoEnabled = profileData.logoEnabled !== undefined ? (profileData.logoEnabled ? 1 : 0) : (existing?.logo_enabled ?? 1);
+    const logoEnabledQuotations = profileData.logoEnabledQuotations !== undefined ? (profileData.logoEnabledQuotations ? 1 : 0) : (existing?.logo_enabled_quotations ?? logoEnabled);
+    const logoEnabledInvoices = profileData.logoEnabledInvoices !== undefined ? (profileData.logoEnabledInvoices ? 1 : 0) : (existing?.logo_enabled_invoices ?? logoEnabled);
 
     if (existing) {
       db.prepare(`
@@ -53,6 +58,10 @@ export async function POST(req: NextRequest) {
           default_validity_days = ?,
           terms_and_conditions = ?,
           bank_details_json = ?,
+          logo_url = ?,
+          logo_enabled = ?,
+          logo_enabled_quotations = ?,
+          logo_enabled_invoices = ?,
           updated_at = ?
         WHERE user_id = ?
       `).run(
@@ -70,6 +79,10 @@ export async function POST(req: NextRequest) {
         profileData.defaultValidityDays ?? 15,
         profileData.termsAndConditions || '',
         profileData.bankDetails ? JSON.stringify(profileData.bankDetails) : null,
+        logoUrl,
+        logoEnabled,
+        logoEnabledQuotations,
+        logoEnabledInvoices,
         now,
         userId
       );
@@ -79,8 +92,10 @@ export async function POST(req: NextRequest) {
         INSERT INTO businesses (
           id, user_id, business_name, owner_name, tagline, phone, email, website, address,
           tax_number, currency, default_tax_percentage, default_payment_terms,
-          default_validity_days, terms_and_conditions, bank_details_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          default_validity_days, terms_and_conditions, bank_details_json,
+          logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         bizId,
         userId,
@@ -98,6 +113,10 @@ export async function POST(req: NextRequest) {
         profileData.defaultValidityDays ?? 15,
         profileData.termsAndConditions || '',
         profileData.bankDetails ? JSON.stringify(profileData.bankDetails) : null,
+        logoUrl,
+        logoEnabled,
+        logoEnabledQuotations,
+        logoEnabledInvoices,
         now,
         now
       );

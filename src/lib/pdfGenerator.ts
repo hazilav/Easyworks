@@ -117,6 +117,8 @@ export function renderDocumentHeader(
     taxNumber?: string;
     logoUrl?: string;
     logoEnabled?: boolean;
+    logoEnabledQuotations?: boolean;
+    logoEnabledInvoices?: boolean;
   },
   docType: 'QUOTATION' | 'INVOICE',
   docNumber: string,
@@ -131,8 +133,13 @@ export function renderDocumentHeader(
   let leftY = startY;
   const leftMaxContentWidth = 105; // Left column width ~58% of usable width (182mm)
 
+  // Determine whether logo is enabled for this specific document type (independent controls)
+  const isLogoEnabled = docType === 'QUOTATION'
+    ? (business.logoEnabledQuotations ?? business.logoEnabled ?? true)
+    : (business.logoEnabledInvoices ?? business.logoEnabled ?? true);
+
   // 1. LEFT SECTION — Logo or Business Name fallback
-  const logo = renderBusinessLogo(doc, business.logoUrl, business.logoEnabled, margin, startY, 38, 16);
+  const logo = renderBusinessLogo(doc, business.logoUrl, isLogoEnabled, margin, startY, 38, 16);
   if (logo.rendered) {
     leftY = startY + logo.height + 4;
   } else {

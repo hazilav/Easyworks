@@ -156,30 +156,49 @@ export default function DeveloperBusinessesView() {
                         {/* Business Logo column */}
                         <td className="px-5 py-4">
                           {biz.hasLogo && biz.logoUrl ? (
-                            <div
-                              onClick={() => setSelectedLogo({ url: biz.logoUrl, name: biz.businessName })}
-                              className="flex items-center gap-2 cursor-pointer group"
-                              title="Click to view full logo"
-                            >
-                              <div className="w-12 h-8 rounded bg-white p-1 flex items-center justify-center border border-zinc-700 overflow-hidden group-hover:border-blue-400 transition-colors">
-                                <img
-                                  src={biz.logoUrl}
-                                  alt="Logo"
-                                  className="max-h-full max-w-full object-contain"
-                                />
-                              </div>
-                              <span
-                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                                  biz.logoEnabled
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                }`}
+                            <div className="flex flex-col gap-1.5">
+                              <div
+                                onClick={() => setSelectedLogo({ url: biz.logoUrl, name: biz.businessName })}
+                                className="flex items-center gap-2 cursor-pointer group"
+                                title="Click to view full logo"
                               >
-                                {biz.logoEnabled ? 'Active' : 'Hidden'}
-                              </span>
+                                <div className="w-12 h-8 rounded bg-white p-1 flex items-center justify-center border border-zinc-700 overflow-hidden group-hover:border-blue-400 transition-colors">
+                                  <img
+                                    src={biz.logoUrl}
+                                    alt="Logo"
+                                    className="max-h-full max-w-full object-contain"
+                                  />
+                                </div>
+                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                  Configured
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[9px] font-mono">
+                                <span
+                                  className={`px-1.5 py-0.2 rounded border ${
+                                    biz.logoEnabledQuotations
+                                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                      : 'bg-zinc-800 text-zinc-500 border-zinc-700'
+                                  }`}
+                                >
+                                  Quotes: {biz.logoEnabledQuotations ? 'ON' : 'OFF'}
+                                </span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded border ${
+                                    biz.logoEnabledInvoices
+                                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                      : 'bg-zinc-800 text-zinc-500 border-zinc-700'
+                                  }`}
+                                >
+                                  Invoices: {biz.logoEnabledInvoices ? 'ON' : 'OFF'}
+                                </span>
+                              </div>
                             </div>
                           ) : (
-                            <span className="text-zinc-500 text-[11px] italic">No logo</span>
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-zinc-500 text-[11px] italic">No logo</span>
+                              <span className="text-zinc-600 text-[9px] font-mono">Quotes: OFF · Invoices: OFF</span>
+                            </div>
                           )}
                         </td>
 

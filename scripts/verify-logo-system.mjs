@@ -82,6 +82,8 @@ async function runTests() {
 
     assert(colNames.includes('logo_url'), 'Column logo_url exists in businesses table');
     assert(colNames.includes('logo_enabled'), 'Column logo_enabled exists in businesses table');
+    assert(colNames.includes('logo_enabled_quotations'), 'Column logo_enabled_quotations exists in businesses table');
+    assert(colNames.includes('logo_enabled_invoices'), 'Column logo_enabled_invoices exists in businesses table');
     assert(colNames.includes('updated_at'), 'Column updated_at exists in businesses table');
   }
 
@@ -125,38 +127,50 @@ async function runTests() {
     });
     assert(fakeRes.status === 400, 'POST /api/business/logo with invalid magic bytes rejected with HTTP 400');
 
-    // 5. Successful Upload of Valid PNG
+    // 5. Successful Upload of Valid PNG with independent controls
     const uploadRes = await request('/api/business/logo', {
       method: 'POST',
-      body: JSON.stringify({ userId: testUserId, logoDataUrl: VALID_PNG_DATA_URL, logoEnabled: true }),
+      body: JSON.stringify({
+        userId: testUserId,
+        logoDataUrl: VALID_PNG_DATA_URL,
+        logoEnabled: true,
+        logoEnabledQuotations: true,
+        logoEnabledInvoices: false,
+      }),
     });
     assert(uploadRes.status === 200, 'POST /api/business/logo with valid PNG returns HTTP 200');
     assert(uploadRes.data.logoUrl === VALID_PNG_DATA_URL, 'Upload response contains saved logoUrl');
-    assert(uploadRes.data.logoEnabled === true, 'Upload response contains logoEnabled: true');
+    assert(uploadRes.data.logoEnabledQuotations === true, 'Upload response has logoEnabledQuotations: true');
+    assert(uploadRes.data.logoEnabledInvoices === false, 'Upload response has logoEnabledInvoices: false');
 
     // Verify persisted in SQLite
-    const row = db.prepare('SELECT logo_url, logo_enabled FROM businesses WHERE user_id = ?').get(testUserId);
+    const row = db.prepare('SELECT logo_url, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(testUserId);
     assert(Boolean(row && row.logo_url === VALID_PNG_DATA_URL), 'Logo URL successfully persisted in SQLite businesses table');
-    assert(row.logo_enabled === 1, 'logo_enabled flag set to 1 in SQLite');
+    assert(row.logo_enabled_quotations === 1, 'logo_enabled_quotations set to 1 in SQLite');
+    assert(row.logo_enabled_invoices === 0, 'logo_enabled_invoices set to 0 in SQLite');
 
-    // 6. Toggle Visibility (PATCH)
-    const toggleOffRes = await request('/api/business/logo', {
+    // 6. Toggle Independent Visibility (PATCH for Invoices)
+    const toggleInvOnRes = await request('/api/business/logo', {
       method: 'PATCH',
-      body: JSON.stringify({ userId: testUserId, logoEnabled: false }),
+      body: JSON.stringify({ userId: testUserId, target: 'invoices', enabled: true }),
     });
-    assert(toggleOffRes.status === 200, 'PATCH /api/business/logo to disable returns HTTP 200');
-    assert(toggleOffRes.data.logoEnabled === false, 'PATCH response reflects logoEnabled: false');
+    assert(toggleInvOnRes.status === 200, 'PATCH /api/business/logo for invoices returns HTTP 200');
+    assert(toggleInvOnRes.data.logoEnabledInvoices === true, 'PATCH response reflects logoEnabledInvoices: true');
+    assert(toggleInvOnRes.data.logoEnabledQuotations === true, 'Quotations logo setting unchanged (remains true)');
+
+    // 7. Toggle Independent Visibility (PATCH for Quotations Off)
+    const toggleQuotesOffRes = await request('/api/business/logo', {
+      method: 'PATCH',
+      body: JSON.stringify({ userId: testUserId, target: 'quotations', enabled: false }),
+    });
+    assert(toggleQuotesOffRes.status === 200, 'PATCH /api/business/logo for quotations off returns HTTP 200');
+    assert(toggleQuotesOffRes.data.logoEnabledQuotations === false, 'Quotations logo is now disabled');
+    assert(toggleQuotesOffRes.data.logoEnabledInvoices === true, 'Invoices logo remains enabled independently');
 
     const getRes2 = await request(`/api/business/logo?userId=${testUserId}`);
-    assert(getRes2.data.logoEnabled === false, 'GET confirms logo is disabled for documents');
-    assert(getRes2.data.logoUrl === VALID_PNG_DATA_URL, 'GET confirms logoUrl remains preserved when hidden');
-
-    // 7. Toggle Visibility Back On (PATCH)
-    const toggleOnRes = await request('/api/business/logo', {
-      method: 'PATCH',
-      body: JSON.stringify({ userId: testUserId, logoEnabled: true }),
-    });
-    assert(toggleOnRes.status === 200 && toggleOnRes.data.logoEnabled === true, 'PATCH re-enables logo successfully');
+    assert(getRes2.data.logoEnabledQuotations === false, 'GET confirms quotations logo is false');
+    assert(getRes2.data.logoEnabledInvoices === true, 'GET confirms invoices logo is true');
+    assert(getRes2.data.logoUrl === VALID_PNG_DATA_URL, 'GET confirms logoUrl preserved');
 
     // 8. Delete Logo (DELETE)
     const deleteRes = await request(`/api/business/logo?userId=${testUserId}`, {
@@ -192,7 +206,8 @@ async function runTests() {
       assert(Boolean(found), 'Test business is listed in Developer Businesses');
       assert(found?.hasLogo === true, 'Developer business item has hasLogo: true');
       assert(found?.logoUrl === VALID_PNG_DATA_URL, 'Developer business item has matching logoUrl');
-      assert(found?.logoEnabled === true, 'Developer business item has logoEnabled: true');
+      assert(found?.logoEnabledQuotations === true, 'Developer business item has logoEnabledQuotations: true');
+      assert(found?.logoEnabledInvoices === true, 'Developer business item has logoEnabledInvoices: true');
     } else {
       console.log('  ⚠️ Skipping developer auth check (access code test mode)');
     }
@@ -219,6 +234,18 @@ async function runTests() {
       const outputWithoutLogo = docWithoutLogo.output('arraybuffer');
       assert(outputWithoutLogo.byteLength > 1000, `jsPDF renders ${t} template without logo cleanly (${outputWithoutLogo.byteLength} bytes)`);
     }
+  }
+
+  // Test Suite 5: Critical Data Preservation
+  console.log('\nTest Suite 5: Data Preservation Verification');
+  {
+    const usersCount = db.prepare('SELECT COUNT(*) as count FROM users WHERE id != ?').get(testUserId).count;
+    const subsCount = db.prepare('SELECT COUNT(*) as count FROM subscriptions').get().count;
+    const bizCount = db.prepare('SELECT COUNT(*) as count FROM businesses WHERE user_id != ?').get(testUserId).count;
+
+    assert(usersCount >= 26, `All saved customer accounts preserved (${usersCount} users)`);
+    assert(subsCount >= 26, `All subscriptions preserved (${subsCount} subscriptions)`);
+    assert(bizCount >= 26, `All business profiles preserved (${bizCount} businesses)`);
   }
 
   // Clean up

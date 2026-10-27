@@ -25,6 +25,8 @@ export const DEFAULT_BUSINESS_PROFILE: BusinessProfile = {
   },
   logoUrl: '',
   logoEnabled: true,
+  logoEnabledQuotations: true,
+  logoEnabledInvoices: true,
 };
 
 export const INITIAL_CATALOG_ITEMS: CatalogItem[] = [
@@ -127,6 +129,8 @@ export function createBlankQuotation(business: BusinessProfile = DEFAULT_BUSINES
       taxNumber: business.taxNumber,
       logoUrl: business.logoUrl,
       logoEnabled: business.logoEnabled ?? true,
+      logoEnabledQuotations: business.logoEnabledQuotations ?? business.logoEnabled ?? true,
+      logoEnabledInvoices: business.logoEnabledInvoices ?? business.logoEnabled ?? true,
     },
     customer: {
       name: '',
@@ -222,6 +226,8 @@ export function createBlankInvoice(
       taxNumber: business.taxNumber,
       logoUrl: business.logoUrl,
       logoEnabled: business.logoEnabled ?? true,
+      logoEnabledQuotations: business.logoEnabledQuotations ?? business.logoEnabled ?? true,
+      logoEnabledInvoices: business.logoEnabledInvoices ?? business.logoEnabled ?? true,
     },
     customer: {
       name: '',
