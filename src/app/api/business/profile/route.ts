@@ -36,10 +36,29 @@ export async function POST(req: NextRequest) {
     const now = new Date().toISOString();
     const existing = db.prepare('SELECT id, logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
 
-    const logoUrl = profileData.logoUrl !== undefined ? profileData.logoUrl : (existing?.logo_url ?? '');
-    const logoOriginalUrl = profileData.logoOriginalUrl !== undefined ? profileData.logoOriginalUrl : (existing?.logo_original_url ?? logoUrl);
-    const logoProcessedUrl = profileData.logoProcessedUrl !== undefined ? profileData.logoProcessedUrl : (existing?.logo_processed_url ?? logoUrl);
-    const logoBackgroundMode = profileData.logoBackgroundMode !== undefined ? profileData.logoBackgroundMode : (existing?.logo_background_mode ?? 'transparent');
+    // Do not overwrite an existing logo with an empty string unless explicitly removing it
+    let logoUrl = existing?.logo_url ?? '';
+    if (profileData.removeLogo) {
+      logoUrl = '';
+    } else if (profileData.logoUrl && typeof profileData.logoUrl === 'string' && profileData.logoUrl.trim().length > 0) {
+      logoUrl = profileData.logoUrl;
+    }
+
+    let logoOriginalUrl = existing?.logo_original_url ?? logoUrl;
+    if (profileData.removeLogo) {
+      logoOriginalUrl = '';
+    } else if (profileData.logoOriginalUrl && typeof profileData.logoOriginalUrl === 'string' && profileData.logoOriginalUrl.trim().length > 0) {
+      logoOriginalUrl = profileData.logoOriginalUrl;
+    }
+
+    let logoProcessedUrl = existing?.logo_processed_url ?? logoUrl;
+    if (profileData.removeLogo) {
+      logoProcessedUrl = '';
+    } else if (profileData.logoProcessedUrl && typeof profileData.logoProcessedUrl === 'string' && profileData.logoProcessedUrl.trim().length > 0) {
+      logoProcessedUrl = profileData.logoProcessedUrl;
+    }
+
+    const logoBackgroundMode = profileData.logoBackgroundMode || (existing?.logo_background_mode ?? 'transparent');
     const logoEnabled = profileData.logoEnabled !== undefined ? (profileData.logoEnabled ? 1 : 0) : (existing?.logo_enabled ?? 1);
     const logoEnabledQuotations = profileData.logoEnabledQuotations !== undefined ? (profileData.logoEnabledQuotations ? 1 : 0) : (existing?.logo_enabled_quotations ?? logoEnabled);
     const logoEnabledInvoices = profileData.logoEnabledInvoices !== undefined ? (profileData.logoEnabledInvoices ? 1 : 0) : (existing?.logo_enabled_invoices ?? logoEnabled);

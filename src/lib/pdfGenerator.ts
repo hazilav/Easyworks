@@ -58,8 +58,53 @@ export function registerMontserrat(doc: jsPDF): string {
 }
 
 /**
+ * Safely resolves an image URL or data URL into a jsPDF-compatible image source.
+ */
+function resolveImageSourceForPdf(logoUrl: string): { source: any; naturalWidth?: number; naturalHeight?: number } {
+  if (typeof window === 'undefined' || !logoUrl) {
+    return { source: logoUrl };
+  }
+
+  // 1. If it's already a data URL, jsPDF can process it directly
+  if (logoUrl.startsWith('data:')) {
+    return { source: logoUrl };
+  }
+
+  // 2. Check if cached in global memory
+  if ((window as any).__EW_LOGO_CACHE__ && (window as any).__EW_LOGO_CACHE__.has(logoUrl)) {
+    const cached = (window as any).__EW_LOGO_CACHE__.get(logoUrl);
+    if (cached) return { source: cached };
+  }
+
+  // 3. Look for existing loaded <img> in DOM
+  try {
+    const imgs = Array.from(document.querySelectorAll('img'));
+    const found = imgs.find(img => img.src && (img.src === logoUrl || img.src.includes(logoUrl) || logoUrl.includes(img.src)));
+    if (found && found.complete && found.naturalWidth > 0) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = found.naturalWidth;
+        canvas.height = found.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(found, 0, 0);
+          const dataUrl = canvas.toDataURL('image/png');
+          if (!(window as any).__EW_LOGO_CACHE__) (window as any).__EW_LOGO_CACHE__ = new Map();
+          (window as any).__EW_LOGO_CACHE__.set(logoUrl, dataUrl);
+          return { source: dataUrl, naturalWidth: found.naturalWidth, naturalHeight: found.naturalHeight };
+        }
+      } catch {
+        return { source: found, naturalWidth: found.naturalWidth, naturalHeight: found.naturalHeight };
+      }
+    }
+  } catch {}
+
+  return { source: logoUrl };
+}
+
+/**
  * Safely renders the business logo if provided and enabled.
- * Preserves aspect ratio with max bounds: maxWidthMm (default 36mm) and maxHeightMm (default 16mm).
+ * Preserves aspect ratio with max bounds: maxWidthMm (default 38mm) and maxHeightMm (default 16mm).
  */
 export function renderBusinessLogo(
   doc: jsPDF,
@@ -77,16 +122,30 @@ export function renderBusinessLogo(
     let width = maxWidthMm;
     let height = maxHeightMm;
 
+    const resolved = resolveImageSourceForPdf(logoUrl);
+    const imageSource = resolved.source;
+
     try {
-      const props = doc.getImageProperties(logoUrl);
-      if (props && props.width && props.height) {
-        const aspect = props.width / props.height;
+      if (resolved.naturalWidth && resolved.naturalHeight) {
+        const aspect = resolved.naturalWidth / resolved.naturalHeight;
         if (aspect > maxWidthMm / maxHeightMm) {
           width = maxWidthMm;
           height = maxWidthMm / aspect;
         } else {
           height = maxHeightMm;
           width = maxHeightMm * aspect;
+        }
+      } else {
+        const props = doc.getImageProperties(imageSource);
+        if (props && props.width && props.height) {
+          const aspect = props.width / props.height;
+          if (aspect > maxWidthMm / maxHeightMm) {
+            width = maxWidthMm;
+            height = maxWidthMm / aspect;
+          } else {
+            height = maxHeightMm;
+            width = maxHeightMm * aspect;
+          }
         }
       }
     } catch {
@@ -95,7 +154,7 @@ export function renderBusinessLogo(
 
     // Center vertically within the logo area without stretching or distorting
     const yOffset = Math.max(0, (maxHeightMm - height) / 2);
-    doc.addImage(logoUrl, x, y + yOffset, width, height);
+    doc.addImage(imageSource, x, y + yOffset, width, height);
     return { rendered: true, width, height, yOffset };
   } catch (err) {
     console.warn('[pdfGenerator] Failed to render business logo:', err);

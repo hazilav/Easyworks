@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/database';
 import { apiSuccess, apiError, apiBadRequest, apiNotFound } from '@/lib/api/server';
 import { processBusinessLogo } from '@/lib/imageProcessor';
+import { saveLogoToStorage, switchActiveLogoFile, deleteLogoFiles } from '@/lib/logoStorage';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -231,11 +232,22 @@ export async function POST(req: NextRequest) {
     // Default to processed transparent logo unless explicitly requested otherwise
     const requestedMode = (contentType.includes('application/json') ? (await req.clone().json().catch(() => ({})))?.logoBackgroundMode : undefined) as 'transparent' | 'original' | undefined;
     const initialMode: 'transparent' | 'original' = requestedMode === 'original' ? 'original' : 'transparent';
-    const activeUrl = initialMode === 'original' ? procResult.originalDataUrl : procResult.processedDataUrl;
+
+    // Save files persistently on server disk (survives page refresh & server restarts)
+    const processedBuffer = procResult.processedBuffer || Buffer.from(procResult.processedDataUrl.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const savedUrls = saveLogoToStorage(
+      userId,
+      buffer,
+      mimeType,
+      processedBuffer,
+      initialMode
+    );
+
+    const activeUrl = initialMode === 'original' ? savedUrls.logoOriginalUrl : savedUrls.logoProcessedUrl;
 
     const result = updateBusinessLogo(userId, activeUrl, {
-      logoOriginalUrl: procResult.originalDataUrl,
-      logoProcessedUrl: procResult.processedDataUrl,
+      logoOriginalUrl: savedUrls.logoOriginalUrl,
+      logoProcessedUrl: savedUrls.logoProcessedUrl,
       logoBackgroundMode: initialMode,
       logoEnabled,
       logoEnabledQuotations,
@@ -297,6 +309,7 @@ export async function PATCH(req: NextRequest) {
 
     // 1. Background mode switch or Reset to Original
     if (resetToOriginal) {
+      switchActiveLogoFile(userId, 'original');
       resetBusinessLogoToOriginal(userId);
       const current = getBusinessLogo(userId);
       return apiSuccess({
@@ -312,6 +325,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (mode === 'transparent' || mode === 'original') {
+      switchActiveLogoFile(userId, mode);
       const modeRes = toggleBusinessLogoBackgroundMode(userId, mode);
       const current = getBusinessLogo(userId);
       return apiSuccess({
@@ -381,6 +395,7 @@ export async function DELETE(req: NextRequest) {
       return apiNotFound('User not found.');
     }
 
+    deleteLogoFiles(userId);
     removeBusinessLogo(userId);
     return apiSuccess({
       message: 'Business logo removed successfully.',

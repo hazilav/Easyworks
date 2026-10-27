@@ -36,6 +36,42 @@ export default function BusinessProfileView() {
   const [logoError, setLogoError] = useState<string | null>(null);
   const [showRemoveModal, setShowRemoveModal] = useState(false);
   const [logoDimensions, setLogoDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(!business.logoUrl && Boolean(currentUser?.id));
+
+  // Load saved profile & logo directly on mount to guarantee fresh persistence after refresh
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let isMounted = true;
+
+    fetch(`/api/business/profile?userId=${encodeURIComponent(currentUser.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data && data.success && data.profile) {
+          const p = data.profile;
+          updateBusiness(p);
+          setFormData((prev) => ({
+            ...prev,
+            ...p,
+            logoUrl: p.logoUrl && p.logoUrl.trim().length > 0 ? p.logoUrl : prev.logoUrl,
+            logoOriginalUrl: p.logoOriginalUrl && p.logoOriginalUrl.trim().length > 0 ? p.logoOriginalUrl : (prev.logoOriginalUrl || prev.logoUrl),
+            logoProcessedUrl: p.logoProcessedUrl && p.logoProcessedUrl.trim().length > 0 ? p.logoProcessedUrl : (prev.logoProcessedUrl || prev.logoUrl),
+            logoBackgroundMode: p.logoBackgroundMode || prev.logoBackgroundMode || 'transparent',
+            logoEnabled: p.logoEnabled !== undefined ? p.logoEnabled : prev.logoEnabled,
+            logoEnabledQuotations: p.logoEnabledQuotations !== undefined ? p.logoEnabledQuotations : (p.logoEnabled ?? prev.logoEnabledQuotations),
+            logoEnabledInvoices: p.logoEnabledInvoices !== undefined ? p.logoEnabledInvoices : (p.logoEnabled ?? prev.logoEnabledInvoices),
+          }));
+        }
+      })
+      .catch((err) => console.error('[BusinessProfileView] Error loading profile:', err))
+      .finally(() => {
+        if (isMounted) setLoadingProfile(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.id]);
 
   // Keep formData in sync if business context updates
   useEffect(() => {
@@ -267,7 +303,13 @@ export default function BusinessProfileView() {
     setLogoDimensions(null);
     setLogoError(null);
 
-    const updated = { ...formData, logoUrl: '' };
+    const updated = {
+      ...formData,
+      logoUrl: '',
+      logoOriginalUrl: '',
+      logoProcessedUrl: '',
+      logoEnabled: false,
+    };
     setFormData(updated);
     updateBusiness(updated);
 
@@ -373,7 +415,12 @@ export default function BusinessProfileView() {
             </div>
           )}
 
-          {hasLogo ? (
+          {loadingProfile && !hasLogo ? (
+            <div className="h-44 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 flex flex-col items-center justify-center p-6 bg-slate-50/50 dark:bg-zinc-950/30">
+              <RefreshCw className="w-6 h-6 text-purple-600 animate-spin mb-2" />
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Loading saved business logo...</p>
+            </div>
+          ) : hasLogo ? (
             /* Logo Uploaded State: Preview & Controls */
             <div className="space-y-5">
               {/* Sizing & Background Optimization Header */}

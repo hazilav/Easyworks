@@ -18,6 +18,8 @@ export interface ProcessLogoResult {
   originalDimensions: { width: number; height: number };
   processedDimensions: { width: number; height: number };
   aspectRatio: number;
+  originalBuffer?: Buffer;
+  processedBuffer?: Buffer;
 }
 
 /**
@@ -419,5 +421,7 @@ export async function processBusinessLogo(
     originalDimensions,
     processedDimensions: { width: finalWidth, height: finalHeight },
     aspectRatio,
+    originalBuffer: inputBuffer,
+    processedBuffer: finalPngBuffer,
   };
 }

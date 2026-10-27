@@ -1423,23 +1423,29 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
               <div className="flex justify-between items-start gap-4 sm:gap-6 pb-2">
                 {/* Left Section — Business Details (max ~62% width) */}
                 <div className="max-w-[62%] flex flex-col items-start space-y-1">
-                  {docData.business?.logoUrl &&
-                  docData.business.logoUrl.trim().length > 0 &&
-                  (isQuotation
-                    ? (docData.business.logoEnabledQuotations ?? docData.business.logoEnabled ?? true)
-                    : (docData.business.logoEnabledInvoices ?? docData.business.logoEnabled ?? true)) ? (
-                    <div className="h-[65px] max-w-[150px] flex items-center justify-start mb-2">
-                      <img
-                        src={docData.business.logoUrl}
-                        alt={docData.business.businessName || 'Business Logo'}
-                        className="max-h-[65px] max-w-[150px] object-contain object-left"
-                      />
-                    </div>
-                  ) : (
-                    <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-1">
-                      {docData.business?.businessName || 'Business Name'}
-                    </h2>
-                  )}
+                  {(() => {
+                    const activeLogoUrl = docData.business?.logoUrl || business.logoUrl;
+                    const isLogoEnabled = isQuotation
+                      ? (docData.business?.logoEnabledQuotations ?? business.logoEnabledQuotations ?? docData.business?.logoEnabled ?? business.logoEnabled ?? true)
+                      : (docData.business?.logoEnabledInvoices ?? business.logoEnabledInvoices ?? docData.business?.logoEnabled ?? business.logoEnabled ?? true);
+
+                    if (activeLogoUrl && activeLogoUrl.trim().length > 0 && isLogoEnabled) {
+                      return (
+                        <div className="h-[65px] max-w-[150px] flex items-center justify-start mb-2">
+                          <img
+                            src={activeLogoUrl}
+                            alt={docData.business?.businessName || business.businessName || 'Business Logo'}
+                            className="max-h-[65px] max-w-[150px] object-contain object-left"
+                          />
+                        </div>
+                      );
+                    }
+                    return (
+                      <h2 className="text-xl font-bold text-slate-900 tracking-tight mb-1">
+                        {docData.business?.businessName || business.businessName || 'Business Name'}
+                      </h2>
+                    );
+                  })()}
 
                   <div className="text-xs text-slate-500 space-y-0.5 font-normal break-words leading-relaxed">
                     {docData.business?.address && (

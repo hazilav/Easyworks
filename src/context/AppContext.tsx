@@ -107,14 +107,42 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   // Auth & Session
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const sessionUser = localStorage.getItem('ew_session_user');
+        if (sessionUser) {
+          const parsed = JSON.parse(sessionUser);
+          if (parsed && parsed.id) return parsed;
+        }
+      } catch {}
+    }
+    return null;
+  });
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
   const [isWorkspaceReady, setIsWorkspaceReady] = useState(false);
 
   const [currentView, setCurrentView] = useState<AppView>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [business, setBusiness] = useState<BusinessProfile>(DEFAULT_BUSINESS_PROFILE);
+  const [business, setBusiness] = useState<BusinessProfile>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const sessionUser = localStorage.getItem('ew_session_user');
+        if (sessionUser) {
+          const parsedUser = JSON.parse(sessionUser);
+          if (parsedUser && parsedUser.id) {
+            const savedBiz = localStorage.getItem(`ew_biz_${parsedUser.id}`);
+            if (savedBiz) {
+              const parsedBiz = JSON.parse(savedBiz);
+              if (parsedBiz) return parsedBiz;
+            }
+          }
+        }
+      } catch {}
+    }
+    return DEFAULT_BUSINESS_PROFILE;
+  });
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [catalog, setCatalog] = useState<CatalogItem[]>(INITIAL_CATALOG_ITEMS);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
@@ -351,10 +379,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setBusiness((prev) => ({
               ...prev,
               ...p,
-              logoUrl: p.logoUrl !== undefined ? p.logoUrl : prev.logoUrl,
-              logoOriginalUrl: p.logoOriginalUrl !== undefined ? p.logoOriginalUrl : prev.logoOriginalUrl,
-              logoProcessedUrl: p.logoProcessedUrl !== undefined ? p.logoProcessedUrl : prev.logoProcessedUrl,
-              logoBackgroundMode: p.logoBackgroundMode !== undefined ? p.logoBackgroundMode : prev.logoBackgroundMode,
+              logoUrl: (p.logoUrl && p.logoUrl.trim().length > 0) ? p.logoUrl : prev.logoUrl,
+              logoOriginalUrl: (p.logoOriginalUrl && p.logoOriginalUrl.trim().length > 0) ? p.logoOriginalUrl : (prev.logoOriginalUrl || prev.logoUrl),
+              logoProcessedUrl: (p.logoProcessedUrl && p.logoProcessedUrl.trim().length > 0) ? p.logoProcessedUrl : (prev.logoProcessedUrl || prev.logoUrl),
+              logoBackgroundMode: p.logoBackgroundMode || prev.logoBackgroundMode || 'transparent',
               logoEnabled: p.logoEnabled !== undefined ? p.logoEnabled : prev.logoEnabled,
               logoEnabledQuotations: p.logoEnabledQuotations !== undefined ? p.logoEnabledQuotations : (p.logoEnabled ?? prev.logoEnabledQuotations),
               logoEnabledInvoices: p.logoEnabledInvoices !== undefined ? p.logoEnabledInvoices : (p.logoEnabled ?? prev.logoEnabledInvoices),
@@ -383,16 +411,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Save isolated user data whenever state updates
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.id) return;
     const uid = currentUser.id;
     try {
-      localStorage.setItem(`ew_biz_${uid}`, JSON.stringify(business));
+      // Guard against quota exceeded if legacy base64 data URLs exist
+      let bizToStore = business;
+      if (business.logoUrl && business.logoUrl.startsWith('data:') && business.logoUrl.length > 500) {
+        bizToStore = {
+          ...business,
+          logoUrl: `/api/business/logo/file?userId=${encodeURIComponent(uid)}&type=active`,
+          logoOriginalUrl: `/api/business/logo/file?userId=${encodeURIComponent(uid)}&type=original`,
+          logoProcessedUrl: `/api/business/logo/file?userId=${encodeURIComponent(uid)}&type=transparent`,
+        };
+      }
+      localStorage.setItem(`ew_biz_${uid}`, JSON.stringify(bizToStore));
       localStorage.setItem(`ew_cust_${uid}`, JSON.stringify(customers));
       localStorage.setItem(`ew_cat_${uid}`, JSON.stringify(catalog));
       localStorage.setItem(`ew_quotes_${uid}`, JSON.stringify(quotations));
       localStorage.setItem(`ew_invoices_${uid}`, JSON.stringify(invoices));
     } catch (e) {
-      // ignore
+      console.warn('[AppContext] Storage sync warning:', e);
     }
   }, [currentUser, business, customers, catalog, quotations, invoices]);
 
