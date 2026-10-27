@@ -58,6 +58,35 @@ export function registerMontserrat(doc: jsPDF): string {
 }
 
 /**
+ * Asynchronously preloads an image URL into a base64 data URL cached in memory.
+ * Ensures jsPDF can embed logos synchronously regardless of the active view.
+ */
+export async function preloadLogoForPdf(logoUrl?: string): Promise<string | null> {
+  if (!logoUrl || typeof window === 'undefined') return null;
+  if (logoUrl.startsWith('data:')) return logoUrl;
+  if ((window as any).__EW_LOGO_CACHE__ && (window as any).__EW_LOGO_CACHE__.has(logoUrl)) {
+    return (window as any).__EW_LOGO_CACHE__.get(logoUrl);
+  }
+  try {
+    const res = await fetch(logoUrl);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read blob'));
+      reader.readAsDataURL(blob);
+    });
+    if (!(window as any).__EW_LOGO_CACHE__) (window as any).__EW_LOGO_CACHE__ = new Map();
+    (window as any).__EW_LOGO_CACHE__.set(logoUrl, dataUrl);
+    return dataUrl;
+  } catch (e) {
+    console.warn('[pdfGenerator] Failed to preload logo:', e);
+    return null;
+  }
+}
+
+/**
  * Safely resolves an image URL or data URL into a jsPDF-compatible image source.
  */
 function resolveImageSourceForPdf(logoUrl: string): { source: any; naturalWidth?: number; naturalHeight?: number } {

@@ -248,6 +248,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (data.success && data.subscription) {
         setSubscription(data.subscription);
       }
+      if (data.success && data.user && data.user.id) {
+        if (!currentUser || currentUser.id !== data.user.id) {
+          const authUser: UserAccount = {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            businessName: data.user.business_name || data.user.businessName,
+            role: data.user.role,
+            createdAt: data.user.created_at || data.user.createdAt,
+          };
+          setCurrentUser(authUser);
+          localStorage.setItem('ew_session_user', JSON.stringify(authUser));
+        }
+      }
       if (data.isSuspended && currentUser) {
         setCurrentUser((prev) => (prev ? { ...prev, status: 'SUSPENDED' as any } : prev));
       }
@@ -376,6 +390,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .then((data) => {
           if (data && data.success && data.profile) {
             const p = data.profile;
+            if (typeof window !== 'undefined') {
+              if (!(window as any).__EW_LOGO_CACHE__) (window as any).__EW_LOGO_CACHE__ = new Map();
+              if (p.logoData && p.logoUrl) (window as any).__EW_LOGO_CACHE__.set(p.logoUrl, p.logoData);
+              if (p.logoOriginalData && p.logoOriginalUrl) (window as any).__EW_LOGO_CACHE__.set(p.logoOriginalUrl, p.logoOriginalData);
+              if (p.logoProcessedData && p.logoProcessedUrl) (window as any).__EW_LOGO_CACHE__.set(p.logoProcessedUrl, p.logoProcessedData);
+            }
             setBusiness((prev) => ({
               ...prev,
               ...p,

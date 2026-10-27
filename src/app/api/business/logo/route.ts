@@ -201,10 +201,15 @@ export async function POST(req: NextRequest) {
       return apiBadRequest('User ID is required.');
     }
 
+    const reqId = 'req_logo_' + Date.now().toString(36);
+    console.log(`[LOGO DIAGNOSTIC] POST /api/business/logo - reqId: ${reqId}, requestedUserId: ${userId}, size: ${buffer.length} bytes, mime: ${mimeType}`);
+
     const user = getUserById(userId);
     if (!user) {
+      console.warn(`[LOGO DIAGNOSTIC] POST /api/business/logo - User not found for ID: ${userId}`);
       return apiNotFound('User not found.');
     }
+    const effectiveUserId = user.id;
 
     // Process image: remove background where appropriate, auto-trim, and preserve original
     let procResult;
@@ -236,7 +241,7 @@ export async function POST(req: NextRequest) {
     // Save files persistently on server disk (survives page refresh & server restarts)
     const processedBuffer = procResult.processedBuffer || Buffer.from(procResult.processedDataUrl.replace(/^data:[^;]+;base64,/, ''), 'base64');
     const savedUrls = saveLogoToStorage(
-      userId,
+      effectiveUserId,
       buffer,
       mimeType,
       processedBuffer,
@@ -244,15 +249,21 @@ export async function POST(req: NextRequest) {
     );
 
     const activeUrl = initialMode === 'original' ? savedUrls.logoOriginalUrl : savedUrls.logoProcessedUrl;
+    const activeData = initialMode === 'original' ? procResult.originalDataUrl : procResult.processedDataUrl;
 
-    const result = updateBusinessLogo(userId, activeUrl, {
+    const result = updateBusinessLogo(effectiveUserId, activeUrl, {
       logoOriginalUrl: savedUrls.logoOriginalUrl,
       logoProcessedUrl: savedUrls.logoProcessedUrl,
+      logoData: activeData,
+      logoOriginalData: procResult.originalDataUrl,
+      logoProcessedData: procResult.processedDataUrl,
       logoBackgroundMode: initialMode,
       logoEnabled,
       logoEnabledQuotations,
       logoEnabledInvoices,
     });
+
+    console.log(`[LOGO DIAGNOSTIC] POST /api/business/logo - SUCCESS. effectiveUserId: ${effectiveUserId}, activeUrl: ${result.logoUrl}, mode: ${initialMode}`);
 
     return apiSuccess({
       message: procResult.backgroundRemoved

@@ -15,7 +15,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/calculator';
-import { generateQuotationPDF, generateInvoicePDF } from '@/lib/pdfGenerator';
+import { generateQuotationPDF, generateInvoicePDF, preloadLogoForPdf } from '@/lib/pdfGenerator';
 import { Quotation, Invoice } from '@/types';
 
 export default function DashboardView() {
@@ -55,6 +55,7 @@ export default function DashboardView() {
     }
     const allowed = await requestPdfDownload('quotation', quote.id, quote.quotationNumber);
     if (!allowed) return;
+    await preloadLogoForPdf(business.logoUrl || quote.business?.logoUrl);
     const doc = generateQuotationPDF(quote, business);
     doc.save(`${quote.quotationNumber}.pdf`);
   };
@@ -66,6 +67,7 @@ export default function DashboardView() {
     }
     const allowed = await requestPdfDownload('invoice', inv.id, inv.invoiceNumber);
     if (!allowed) return;
+    await preloadLogoForPdf(business.logoUrl || inv.business?.logoUrl);
     const doc = generateInvoicePDF(inv, business);
     doc.save(`${inv.invoiceNumber}.pdf`);
   };

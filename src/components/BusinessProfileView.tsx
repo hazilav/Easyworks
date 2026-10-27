@@ -49,6 +49,7 @@ export default function BusinessProfileView() {
         if (!isMounted) return;
         if (data && data.success && data.profile) {
           const p = data.profile;
+          console.log(`[LOGO DIAGNOSTIC] BusinessProfileView on-mount loaded - userId: ${currentUser.id}, logoUrl: ${p.logoUrl || 'NONE'}`);
           updateBusiness(p);
           setFormData((prev) => ({
             ...prev,

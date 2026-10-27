@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Invoice } from '@/types';
 import { formatCurrency } from '@/lib/calculator';
-import { generateInvoicePDF } from '@/lib/pdfGenerator';
+import { generateInvoicePDF, preloadLogoForPdf } from '@/lib/pdfGenerator';
 import {
   Receipt,
   Plus,
@@ -53,6 +53,7 @@ export default function InvoicesListView() {
     }
     const allowed = await requestPdfDownload('invoice', inv.id, inv.invoiceNumber);
     if (!allowed) return;
+    await preloadLogoForPdf(business.logoUrl || inv.business?.logoUrl);
     const doc = generateInvoicePDF(inv, business);
     doc.save(`${inv.invoiceNumber}.pdf`);
   };

@@ -16,7 +16,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/calculator';
-import { generateQuotationPDF } from '@/lib/pdfGenerator';
+import { generateQuotationPDF, preloadLogoForPdf } from '@/lib/pdfGenerator';
 import { Quotation, QuotationStatus } from '@/types';
 
 export default function QuotationsListView() {
@@ -55,12 +55,14 @@ export default function QuotationsListView() {
     }
     const allowed = await requestPdfDownload('quotation', quote.id, quote.quotationNumber);
     if (!allowed) return;
+    await preloadLogoForPdf(business.logoUrl || quote.business?.logoUrl);
     const doc = generateQuotationPDF(quote, business);
     doc.save(`${quote.quotationNumber}.pdf`);
   };
 
   const handlePrint = async (quote: Quotation) => {
     // Browser print does NOT consume PDF credit (Requirement 7)
+    await preloadLogoForPdf(business.logoUrl || quote.business?.logoUrl);
     const doc = generateQuotationPDF(quote, business);
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');

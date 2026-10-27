@@ -17,7 +17,7 @@ import {
   generateQuotationNumber,
   generateInvoiceNumber,
 } from '@/lib/calculator';
-import { generateQuotationPDF, generateInvoicePDF } from '@/lib/pdfGenerator';
+import { generateQuotationPDF, generateInvoicePDF, preloadLogoForPdf } from '@/lib/pdfGenerator';
 import {
   ArrowLeft,
   Save,
@@ -346,6 +346,9 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
       );
       if (!allowed) return;
 
+      const activeLogo = business.logoUrl || docData.business?.logoUrl;
+      await preloadLogoForPdf(activeLogo);
+
       if (isQuotation) {
         const doc = generateQuotationPDF(docData as Quotation, business);
         doc.save(`${docData.quotationNumber || 'Quotation'}.pdf`);
@@ -363,6 +366,9 @@ export default function DocumentEditor({ documentType }: DocumentEditorProps) {
   const handlePrint = async () => {
     try {
       // Browser print does NOT consume PDF credit (Requirement 7)
+      const activeLogo = business.logoUrl || docData.business?.logoUrl;
+      await preloadLogoForPdf(activeLogo);
+
       const doc = isQuotation
         ? generateQuotationPDF(docData as Quotation, business)
         : generateInvoicePDF(docData as Invoice, business);

@@ -504,6 +504,9 @@ function initDatabase(db: DatabaseSync) {
   try { db.exec('ALTER TABLE businesses ADD COLUMN terms_and_conditions TEXT;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN bank_details_json TEXT;'); } catch {}
   try { db.exec('ALTER TABLE businesses ADD COLUMN updated_at TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_data TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_original_data TEXT;'); } catch {}
+  try { db.exec('ALTER TABLE businesses ADD COLUMN logo_processed_data TEXT;'); } catch {}
 
   // Update plan prices, names, and PDF download limits: Basic=299 (30), Standard=849 (90), Premium=1699 (180)
   try {
@@ -894,7 +897,11 @@ export function ensureUserExists(
 export function getUserById(userId: string): any {
   if (!userId) return null;
   const db = getDatabase();
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  let user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!user && userId.includes('@')) {
+    user = db.prepare('SELECT * FROM users WHERE LOWER(email) = LOWER(?)').get(userId.trim());
+  }
+  return user;
 }
 
 export function getUserByEmail(email: string): any {
@@ -4094,6 +4101,9 @@ export function updateBusinessLogo(
   options?: {
     logoOriginalUrl?: string;
     logoProcessedUrl?: string;
+    logoData?: string;
+    logoOriginalData?: string;
+    logoProcessedData?: string;
     logoBackgroundMode?: 'transparent' | 'original';
     logoEnabled?: boolean;
     logoEnabledQuotations?: boolean;
@@ -4117,6 +4127,9 @@ export function updateBusinessLogo(
   let logoEnabledInvoices = true;
   let logoOriginalUrl = logoUrl;
   let logoProcessedUrl = logoUrl;
+  let logoData = '';
+  let logoOriginalData = '';
+  let logoProcessedData = '';
   let logoBackgroundMode: 'transparent' | 'original' = 'transparent';
 
   if (typeof options === 'boolean') {
@@ -4129,24 +4142,44 @@ export function updateBusinessLogo(
     logoEnabledInvoices = options.logoEnabledInvoices ?? logoEnabled;
     if (options.logoOriginalUrl) logoOriginalUrl = options.logoOriginalUrl;
     if (options.logoProcessedUrl) logoProcessedUrl = options.logoProcessedUrl;
+    if (options.logoData) logoData = options.logoData;
+    if (options.logoOriginalData) logoOriginalData = options.logoOriginalData;
+    if (options.logoProcessedData) logoProcessedData = options.logoProcessedData;
     if (options.logoBackgroundMode) logoBackgroundMode = options.logoBackgroundMode;
   }
 
   // Active logo depends on mode
   const activeLogoUrl = logoBackgroundMode === 'original' ? logoOriginalUrl : (logoProcessedUrl || logoUrl);
+  const activeLogoData = logoBackgroundMode === 'original' ? (logoOriginalData || logoData) : (logoProcessedData || logoData);
 
-  const existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
+  let existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!existing && userId.includes('@')) {
+    const userMatch = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(userId) as any;
+    if (userMatch) {
+      existing = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userMatch.id) as any;
+      if (existing) userId = userMatch.id;
+    }
+  }
+
+  console.log(`[LOGO DIAGNOSTIC] updateBusinessLogo - userId: ${userId}, existing biz: ${existing?.id || 'none'}, activeUrl: ${activeLogoUrl ? activeLogoUrl.slice(0, 70) : 'none'}, hasData: ${Boolean(activeLogoData)}`);
 
   if (existing) {
-    db.prepare(`
+    const updateResult = db.prepare(`
       UPDATE businesses 
-      SET logo_url = ?, logo_original_url = ?, logo_processed_url = ?, logo_background_mode = ?,
+      SET logo_url = ?, logo_original_url = ?, logo_processed_url = ?,
+          logo_data = CASE WHEN ? != '' THEN ? ELSE logo_data END,
+          logo_original_data = CASE WHEN ? != '' THEN ? ELSE logo_original_data END,
+          logo_processed_data = CASE WHEN ? != '' THEN ? ELSE logo_processed_data END,
+          logo_background_mode = ?,
           logo_enabled = ?, logo_enabled_quotations = ?, logo_enabled_invoices = ?, updated_at = ? 
       WHERE user_id = ?
     `).run(
       activeLogoUrl,
       logoOriginalUrl,
       logoProcessedUrl,
+      activeLogoData, activeLogoData,
+      logoOriginalData, logoOriginalData,
+      logoProcessedData, logoProcessedData,
       logoBackgroundMode,
       logoEnabled ? 1 : 0,
       logoEnabledQuotations ? 1 : 0,
@@ -4154,15 +4187,18 @@ export function updateBusinessLogo(
       now,
       userId
     );
+    console.log(`[LOGO DIAGNOSTIC] updateBusinessLogo - UPDATE executed, changes: ${(updateResult as any)?.changes}`);
   } else {
     const user = db.prepare('SELECT name, business_name FROM users WHERE id = ?').get(userId) as any;
     const bizId = 'biz_' + crypto.randomUUID().slice(0, 8);
-    db.prepare(`
+    const insertResult = db.prepare(`
       INSERT INTO businesses (
         id, user_id, business_name, owner_name, currency,
-        logo_url, logo_original_url, logo_processed_url, logo_background_mode,
-        logo_enabled, logo_enabled_quotations, logo_enabled_invoices, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        logo_url, logo_original_url, logo_processed_url,
+        logo_data, logo_original_data, logo_processed_data,
+        logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       bizId,
       userId,
@@ -4171,6 +4207,9 @@ export function updateBusinessLogo(
       activeLogoUrl,
       logoOriginalUrl,
       logoProcessedUrl,
+      activeLogoData,
+      logoOriginalData,
+      logoProcessedData,
       logoBackgroundMode,
       logoEnabled ? 1 : 0,
       logoEnabledQuotations ? 1 : 0,
@@ -4178,6 +4217,7 @@ export function updateBusinessLogo(
       now,
       now
     );
+    console.log(`[LOGO DIAGNOSTIC] updateBusinessLogo - INSERT executed for ${bizId}, changes: ${(insertResult as any)?.changes}`);
   }
 
   logActivity(userId, 'BUSINESS_LOGO_UPDATED', 'Business logo updated', 'USER');
@@ -4206,7 +4246,14 @@ export function toggleBusinessLogoBackgroundMode(
 } {
   const db = getDatabase();
   const now = new Date().toISOString();
-  const row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url FROM businesses WHERE user_id = ?').get(userId) as any;
+  let row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_original_data, logo_processed_data FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!row && userId.includes('@')) {
+    const userMatch = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(userId) as any;
+    if (userMatch) {
+      row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_original_data, logo_processed_data FROM businesses WHERE user_id = ?').get(userMatch.id) as any;
+      if (row) userId = userMatch.id;
+    }
+  }
 
   if (!row) {
     return { success: false, logoUrl: null, logoBackgroundMode: mode };
@@ -4215,13 +4262,17 @@ export function toggleBusinessLogoBackgroundMode(
   const newActiveUrl = mode === 'original'
     ? (row.logo_original_url || row.logo_url)
     : (row.logo_processed_url || row.logo_url);
+  const newActiveData = mode === 'original'
+    ? (row.logo_original_data || row.logo_data)
+    : (row.logo_processed_data || row.logo_data);
 
   db.prepare(`
     UPDATE businesses 
-    SET logo_url = ?, logo_background_mode = ?, updated_at = ? 
+    SET logo_url = ?, logo_background_mode = ?, logo_data = ?, updated_at = ? 
     WHERE user_id = ?
-  `).run(newActiveUrl, mode, now, userId);
+  `).run(newActiveUrl, mode, newActiveData, now, userId);
 
+  console.log(`[LOGO DIAGNOSTIC] toggleBusinessLogoBackgroundMode - userId: ${userId}, mode: ${mode}, activeUrl: ${newActiveUrl ? newActiveUrl.slice(0, 70) : 'none'}`);
   logActivity(userId, 'BUSINESS_LOGO_MODE_CHANGED', `Business logo background set to ${mode}`, 'USER');
   return { success: true, logoUrl: newActiveUrl, logoBackgroundMode: mode };
 }
@@ -4296,13 +4347,22 @@ export function toggleBusinessLogo(
 export function removeBusinessLogo(userId: string): { success: boolean } {
   const db = getDatabase();
   const now = new Date().toISOString();
+  let effectiveUserId = userId;
+  let row = db.prepare('SELECT id FROM businesses WHERE user_id = ?').get(userId);
+  if (!row && userId.includes('@')) {
+    const userMatch = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(userId) as any;
+    if (userMatch) effectiveUserId = userMatch.id;
+  }
+
   db.prepare(`
     UPDATE businesses 
-    SET logo_url = NULL, logo_original_url = NULL, logo_processed_url = NULL, updated_at = ? 
+    SET logo_url = NULL, logo_original_url = NULL, logo_processed_url = NULL,
+        logo_data = NULL, logo_original_data = NULL, logo_processed_data = NULL, updated_at = ? 
     WHERE user_id = ?
-  `).run(now, userId);
+  `).run(now, effectiveUserId);
 
-  logActivity(userId, 'BUSINESS_LOGO_REMOVED', 'Business logo removed', 'USER');
+  console.log(`[LOGO DIAGNOSTIC] removeBusinessLogo - user ${userId} (effective ${effectiveUserId}) logo cleared`);
+  logActivity(effectiveUserId, 'BUSINESS_LOGO_REMOVED', 'Business logo removed', 'USER');
   return { success: true };
 }
 
@@ -4319,7 +4379,14 @@ export function getBusinessLogo(userId: string): {
   logoEnabledInvoices: boolean;
 } {
   const db = getDatabase();
-  const row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+  let row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!row && userId.includes('@')) {
+    const userMatch = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(userId) as any;
+    if (userMatch) {
+      row = db.prepare('SELECT logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userMatch.id) as any;
+    }
+  }
+
   if (!row) {
     return {
       logoUrl: null,
@@ -4347,8 +4414,17 @@ export function getBusinessLogo(userId: string): {
  */
 export function getBusinessProfileByUserId(userId: string): any | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT * FROM businesses WHERE user_id = ?').get(userId) as any;
-  if (!row) return null;
+  let row = db.prepare('SELECT * FROM businesses WHERE user_id = ?').get(userId) as any;
+  if (!row && userId.includes('@')) {
+    const userMatch = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(userId) as any;
+    if (userMatch) {
+      row = db.prepare('SELECT * FROM businesses WHERE user_id = ?').get(userMatch.id) as any;
+    }
+  }
+  if (!row) {
+    console.log(`[LOGO DIAGNOSTIC] getBusinessProfileByUserId - NO business found for user: ${userId}`);
+    return null;
+  }
 
   let bankDetails: any = undefined;
   if (row.bank_details_json) {
@@ -4356,6 +4432,8 @@ export function getBusinessProfileByUserId(userId: string): any | null {
       bankDetails = JSON.parse(row.bank_details_json);
     } catch {}
   }
+
+  console.log(`[LOGO DIAGNOSTIC] getBusinessProfileByUserId - user: ${userId}, bizId: ${row.id}, logoUrl: ${row.logo_url || 'NONE'}, hasLogoData: ${Boolean(row.logo_data)}`);
 
   return {
     id: row.id,
@@ -4377,6 +4455,9 @@ export function getBusinessProfileByUserId(userId: string): any | null {
     logoUrl: row.logo_url || '',
     logoOriginalUrl: row.logo_original_url || row.logo_url || '',
     logoProcessedUrl: row.logo_processed_url || row.logo_url || '',
+    logoData: row.logo_data || '',
+    logoOriginalData: row.logo_original_data || '',
+    logoProcessedData: row.logo_processed_data || '',
     logoBackgroundMode: (row.logo_background_mode as any) || 'transparent',
     logoEnabled: row.logo_enabled !== 0,
     logoEnabledQuotations: row.logo_enabled_quotations !== 0,

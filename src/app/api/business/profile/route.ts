@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     }
 
     const profile = getBusinessProfileByUserId(userId);
+    console.log(`[LOGO DIAGNOSTIC] GET /api/business/profile - userId: ${userId}, profileFound: ${Boolean(profile)}, logoUrl: ${profile?.logoUrl || 'NONE'}`);
     return apiSuccess({ profile });
   } catch (error: any) {
     console.error('[GET /api/business/profile] Error:', error);
@@ -31,10 +32,13 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return apiNotFound('User not found.');
     }
+    const effectiveUserId = user.id;
 
     const db = getDatabase();
     const now = new Date().toISOString();
-    const existing = db.prepare('SELECT id, logo_url, logo_original_url, logo_processed_url, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(userId) as any;
+    let existing = db.prepare('SELECT id, logo_url, logo_original_url, logo_processed_url, logo_data, logo_original_data, logo_processed_data, logo_background_mode, logo_enabled, logo_enabled_quotations, logo_enabled_invoices FROM businesses WHERE user_id = ?').get(effectiveUserId) as any;
+
+    console.log(`[LOGO DIAGNOSTIC] POST /api/business/profile - userId: ${userId}, effectiveUserId: ${effectiveUserId}, existingBiz: ${existing?.id || 'none'}, incomingLogo: ${profileData.logoUrl ? profileData.logoUrl.slice(0, 50) : 'none'}`);
 
     // Do not overwrite an existing logo with an empty string unless explicitly removing it
     let logoUrl = existing?.logo_url ?? '';
@@ -112,7 +116,7 @@ export async function POST(req: NextRequest) {
         logoEnabledQuotations,
         logoEnabledInvoices,
         now,
-        userId
+        effectiveUserId
       );
     } else {
       const bizId = 'biz_' + crypto.randomUUID().slice(0, 8);
@@ -127,7 +131,7 @@ export async function POST(req: NextRequest) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         bizId,
-        userId,
+        effectiveUserId,
         profileData.businessName || user.business_name || 'My Business',
         profileData.ownerName || user.name || 'Owner',
         profileData.tagline || '',
@@ -154,8 +158,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    logActivity(userId, 'BUSINESS_PROFILE_UPDATED', 'Business profile updated', 'USER');
-    const updatedProfile = getBusinessProfileByUserId(userId);
+    logActivity(effectiveUserId, 'BUSINESS_PROFILE_UPDATED', 'Business profile updated', 'USER');
+    const updatedProfile = getBusinessProfileByUserId(effectiveUserId);
+    console.log(`[LOGO DIAGNOSTIC] POST /api/business/profile - SAVED. returning logoUrl: ${updatedProfile?.logoUrl || 'NONE'}`);
     return apiSuccess({ profile: updatedProfile });
   } catch (error: any) {
     console.error('[POST /api/business/profile] Error:', error);
